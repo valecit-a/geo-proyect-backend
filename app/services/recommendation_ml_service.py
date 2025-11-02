@@ -78,12 +78,12 @@ class RecommendationMLService:
                 direccion=prop.direccion or f"Propiedad {prop.id}",
                 comuna=comuna_nombre,
                 precio=prop.precio,
-                superficie_util=prop.superficie_util,
-                dormitorios=prop.dormitorios,
-                banos=prop.banos,
-                estacionamientos=prop.estacionamientos,
-                latitud=prop.latitud,
-                longitud=prop.longitud,
+                superficie_util=prop.superficie_util or 0.0,
+                dormitorios=prop.dormitorios or 0,
+                banos=prop.banos or 0,
+                estacionamientos=prop.estacionamientos or 0,
+                latitud=prop.latitud or 0.0,
+                longitud=prop.longitud or 0.0,
                 score_total=round(resultado['score_total'], 2),
                 score_confianza=round(resultado['confianza'], 3),
                 scores_por_categoria=resultado['scores_categorias'],
@@ -113,6 +113,12 @@ class RecommendationMLService:
     def _filtrar_propiedades(self, pref: PreferenciasDetalladas) -> List[Propiedad]:
         """Aplica hard constraints (filtros obligatorios)"""
         query = self.db.query(Propiedad)
+        
+        # Filtro básico: solo propiedades con coordenadas válidas
+        query = query.filter(
+            Propiedad.latitud.isnot(None),
+            Propiedad.longitud.isnot(None)
+        )
         
         # Filtros de precio
         if pref.precio_min:

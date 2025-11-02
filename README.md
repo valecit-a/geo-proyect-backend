@@ -1,193 +1,445 @@
-# Backend Inmobiliario - Sistema de Recomendaciones con ML
+# 🏠 Backend Inmobiliario - API de Predicción de Precios
 
-## 📁 Estructura del Proyecto
+Backend profesional en Python con FastAPI para predicción de precios inmobiliarios usando Machine Learning y datos geoespaciales.
+
+## 📋 Características
+
+- ✅ **API REST** con FastAPI
+- ✅ **PostgreSQL + PostGIS** para datos geoespaciales
+- ✅ **Machine Learning** con Random Forest optimizado (R² = 0.914)
+- ✅ **Validación de datos** con Pydantic
+- ✅ **Documentación automática** con Swagger/ReDoc
+- ✅ **Logging estructurado** con Loguru
+- ✅ **CORS** configurado
+- ✅ **Arquitectura limpia** y escalable
+
+## 🗂️ Estructura del Proyecto
 
 ```
 geo-proyect-backend/
 ├── app/
 │   ├── __init__.py
-│   ├── main.py                    # Aplicación FastAPI principal
-│   ├── config.py                  # Configuración y variables de entorno
-│   ├── database.py                # Conexión a PostgreSQL/PostGIS
-│   ├── api/
-│   │   ├── __init__.py
-│   │   └── routes.py              # Endpoints REST
-│   ├── models/
-│   │   ├── __init__.py
-│   │   └── models.py              # Modelos ORM (Propiedad, Comuna)
-│   ├── schemas/
-│   │   ├── __init__.py
-│   │   ├── schemas.py             # Schemas Pydantic
-│   │   └── schemas_ml.py          # Schemas ML (PreferenciasDetalladas)
-│   └── services/
-│       ├── __init__.py
-│       ├── ml_service.py          # Servicio de Machine Learning
-│       └── recommendation_ml_service.py  # Sistema de recomendaciones
-├── Dockerfile                      # Imagen Docker del backend
-├── .dockerignore                   # Archivos excluidos de Docker
-├── init-db.sql                     # Script de inicialización de BD
-├── requirements.txt                # Dependencias Python
-└── cargar_propiedades.py           # Script para cargar datos
-
+│   ├── main.py              # Aplicación FastAPI principal
+│   ├── config.py            # Configuración (variables de entorno)
+│   ├── database.py          # Conexión a PostgreSQL/PostGIS
+│   ├── models.py            # Modelos ORM (SQLAlchemy)
+│   ├── schemas.py           # Schemas Pydantic (validación)
+│   ├── routes.py            # Endpoints de la API
+│   └── ml_service.py        # Servicio de Machine Learning
+│
+├── scripts/
+│   ├── init_db.py           # Inicialización de base de datos
+│   └── test_model.py        # Test del modelo ML
+│
+├── logs/                    # Logs de la aplicación
+├── .env                     # Variables de entorno
+├── .gitignore
+├── requirements.txt         # Dependencias
+├── run.sh                   # Script de inicio
+└── README.md               # Este archivo
 ```
 
-## 🚀 Tecnologías
+## 🚀 Instalación
 
-- **FastAPI** 0.115.4 - Framework web moderno
-- **SQLAlchemy** 2.0.36 - ORM para PostgreSQL
-- **GeoAlchemy2** 0.15.2 - Extensión geoespacial
-- **Pydantic** 2.9.2 - Validación de datos
-- **PostgreSQL 15** + **PostGIS 3.3** - Base de datos geoespacial
-- **Uvicorn** 0.32.0 - Servidor ASGI
+### 1. Requisitos previos
 
-## 🔧 Configuración
+- Python 3.12+
+- PostgreSQL 14+ con PostGIS
+- pgAdmin (opcional, para gestión visual)
 
-### Variables de Entorno (docker-compose.yml)
+### 2. Clonar y preparar
 
-```yaml
-DATABASE_URL: postgresql://postgres:postgres@db:5432/inmobiliaria_db
-DB_HOST: db
-DB_PORT: 5432
-DB_NAME: inmobiliaria_db
-DB_USER: postgres
-DB_PASSWORD: postgres
-MODEL_PATH: /app/models/model.pkl
-ENVIRONMENT: production
-BACKEND_CORS_ORIGINS: '["http://localhost:3000","http://localhost","http://frontend:3000"]'
-```
-
-## 📡 Endpoints Principales
-
-### Health Check
 ```bash
-GET http://localhost:8000/api/v1/health
+cd /home/felipe/Documentos/GeoInformatica/geo-proyect-backend
 ```
 
-**Respuesta:**
+### 3. Crear entorno virtual
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+### 4. Instalar dependencias
+
+```bash
+pip install -r requirements.txt
+```
+
+### 5. Configurar base de datos
+
+#### Opción A: Usar PostgreSQL existente
+
+Abre pgAdmin y crea la base de datos:
+
+```sql
+CREATE DATABASE inmobiliario_db;
+```
+
+#### Opción B: Crear desde terminal
+
+```bash
+psql -U postgres -c "CREATE DATABASE inmobiliario_db;"
+```
+
+### 6. Verificar configuración
+
+Edita `.env` si necesitas cambiar credenciales:
+
+```bash
+nano .env
+```
+
+Variables principales:
+- `DB_USER=postgres`
+- `DB_PASSWORD=felipeb222`
+- `DB_NAME=inmobiliario_db`
+- `MODEL_PATH=../autocorrelacion_espacial/semana4_recoleccion_datos/modelo_rf_optimizado_20251101_175356.pkl`
+
+### 7. Inicializar base de datos
+
+```bash
+python scripts/init_db.py
+```
+
+Esto creará:
+- Extensión PostGIS
+- Todas las tablas (propiedades, comunas, predicciones)
+- 6 comunas iniciales
+
+### 8. Probar el modelo ML
+
+```bash
+python scripts/test_model.py
+```
+
+Debe mostrar una predicción exitosa.
+
+## 🎮 Uso
+
+### Iniciar el servidor
+
+```bash
+# Opción 1: Con script
+chmod +x run.sh
+./run.sh
+
+# Opción 2: Directo con uvicorn
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+El servidor estará disponible en:
+- **API**: http://localhost:8000
+- **Documentación Swagger**: http://localhost:8000/docs
+- **Documentación ReDoc**: http://localhost:8000/redoc
+
+## 📡 Endpoints de la API
+
+### 🏥 Sistema
+
+#### `GET /api/v1/health`
+Health check del sistema
+
+```bash
+curl http://localhost:8000/api/v1/health
+```
+
+### 🔮 Predicciones
+
+#### `POST /api/v1/prediccion`
+Predice el precio de una propiedad
+
+**Request:**
 ```json
 {
-  "status": "healthy",
-  "version": "1.0.0",
-  "database": "✅ Conectada",
-  "modelo": "✅ Sistema ML activo",
-  "timestamp": "2025-11-02T21:23:39.741078"
-}
-```
-
-### Recomendaciones ML
-```bash
-POST http://localhost:8000/api/v1/recomendaciones-ml
-Content-Type: application/json
-
-{
-  "presupuesto_min": 200000,
-  "presupuesto_max": 400000,
+  "superficie": 85.0,
   "dormitorios": 2,
-  "tipo_inmueble_preferido": "departamento",
-  "comuna": "Ñuñoa",
-  "prioridad_transporte": 8,
-  "prioridad_educacion": 5,
-  "prioridad_salud": 7,
-  "prioridad_areas_verdes": 6,
-  "prioridad_seguridad": 4,
-  "prioridad_ambiente": 3,
-  "evitar_ruido": true,
-  "evitar_contaminacion": false,
-  "peso_precio": 0.25,
-  "peso_ubicacion": 0.20,
-  "peso_caracteristicas": 0.15,
-  "peso_transporte": 0.15,
-  "peso_educacion": 0.10,
-  "peso_salud": 0.15
+  "banos": 2,
+  "comuna": "Providencia",
+  "dist_metro": 0.5,
+  "dist_supermercado": 0.3,
+  "dist_area_verde": 0.8,
+  "dist_colegio": 0.6,
+  "dist_hospital": 1.2,
+  "dist_mall": 1.5
 }
 ```
+
+**Response:**
+```json
+{
+  "precio_predicho": 165000000,
+  "precio_log": 18.92,
+  "precio_min": 140000000,
+  "precio_max": 190000000,
+  "precio_m2": 1941176,
+  "modelo_r2": 0.914,
+  "modelo_version": "RF_optimizado_20251101",
+  "timestamp": "2025-11-01T18:30:00",
+  "inputs": { ... }
+}
+```
+
+**Ejemplo con curl:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/prediccion" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "superficie": 85.0,
+    "dormitorios": 2,
+    "banos": 2,
+    "comuna": "Providencia",
+    "dist_metro": 0.5
+  }'
+```
+
+#### `GET /api/v1/predicciones/historial`
+Obtiene el historial de predicciones
+
+```bash
+curl "http://localhost:8000/api/v1/predicciones/historial?limit=10"
+```
+
+### 🏘️ Propiedades
+
+#### `POST /api/v1/propiedades`
+Crea una nueva propiedad
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/propiedades" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "comuna": "Providencia",
+    "direccion": "Av. Providencia 1234",
+    "superficie_total": 85.0,
+    "dormitorios": 2,
+    "banos": 2
+  }'
+```
+
+#### `GET /api/v1/propiedades`
+Lista propiedades con filtros
+
+```bash
+# Todas
+curl "http://localhost:8000/api/v1/propiedades"
+
+# Filtrar por comuna
+curl "http://localhost:8000/api/v1/propiedades?comuna=Providencia&limit=20"
+```
+
+#### `GET /api/v1/propiedades/{id}`
+Obtiene una propiedad específica
+
+```bash
+curl "http://localhost:8000/api/v1/propiedades/1"
+```
+
+### 🗺️ Comunas
+
+#### `GET /api/v1/comunas`
+Lista todas las comunas con estadísticas
+
+```bash
+curl "http://localhost:8000/api/v1/comunas"
+```
+
+#### `GET /api/v1/comunas/{nombre}`
+Obtiene información detallada de una comuna
+
+```bash
+curl "http://localhost:8000/api/v1/comunas/Providencia"
+```
+
+### 📊 Estadísticas
+
+#### `GET /api/v1/stats/general`
+Estadísticas generales del sistema
+
+```bash
+curl "http://localhost:8000/api/v1/stats/general"
+```
+
+## 🧪 Testing
+
+### Test del modelo ML
+```bash
+python scripts/test_model.py
+```
+
+### Test de endpoints (con pytest)
+```bash
+pytest
+```
+
+## 📊 Modelo ML
+
+El backend usa el modelo **Random Forest optimizado** entrenado previamente:
+
+- **R² Score**: 0.914 (explica 91.4% de la varianza)
+- **RMSE**: 0.1324 (error en log-precio)
+- **MAE**: 0.0984
+- **Features**: 16 (9 numéricas + 7 dummies de comuna)
+- **Hiperparámetros optimizados**:
+  - n_estimators: 200
+  - max_depth: 20
+  - max_features: 'log2'
+  - bootstrap: False
+
+### Comunas soportadas:
+- Vitacura (referencia)
+- Las Condes
+- Providencia
+- Santiago
+- Ñuñoa
+- La Reina
 
 ## 🗄️ Base de Datos
 
-### Tablas Principales
+### Tablas principales:
 
-**propiedades**
-- 897 propiedades únicas
-- Campos geoespaciales: `geometria` (POINT), `latitud`, `longitud`
-- Distancias calculadas: 17 categorías de servicios
-- Índices de accesibilidad
+1. **comunas**: Comunas de Santiago con geometría
+2. **propiedades**: Propiedades inmobiliarias
+3. **predicciones**: Historial de predicciones
 
-**comunas**
-- 4 comunas: La Reina, Santiago, Ñuñoa, Estación Central
-- Geometrías MULTIPOLYGON
+### Acceder con pgAdmin:
 
-## 🐳 Docker
+1. Abrir pgAdmin
+2. Conectar a servidor: localhost:5432
+3. Usuario: postgres
+4. Contraseña: felipeb222
+5. Base de datos: inmobiliario_db
 
-### Construir Backend
-```bash
-cd /home/felipe/Documentos/GeoInformatica
-sudo docker compose build backend
+### Queries útiles:
+
+```sql
+-- Ver todas las comunas
+SELECT * FROM comunas;
+
+-- Ver propiedades recientes
+SELECT id, comuna_id, superficie_total, dormitorios, banos, precio_predicho
+FROM propiedades
+ORDER BY created_at DESC
+LIMIT 10;
+
+-- Ver historial de predicciones
+SELECT superficie, dormitorios, banos, comuna, precio_predicho, created_at
+FROM predicciones
+ORDER BY created_at DESC
+LIMIT 10;
+
+-- Estadísticas por comuna
+SELECT 
+    c.nombre,
+    COUNT(p.id) as total_propiedades,
+    AVG(p.precio_predicho) as precio_promedio
+FROM comunas c
+LEFT JOIN propiedades p ON c.id = p.comuna_id
+GROUP BY c.nombre;
 ```
 
-### Levantar Servicios
-```bash
-sudo docker compose up -d
+## 📝 Logging
+
+Los logs se guardan en:
+- **Consola**: Output colorizado en tiempo real
+- **Archivo**: `logs/app.log` (rotación automática cada 10MB)
+
+Niveles de log:
+- INFO: Operaciones normales
+- WARNING: Advertencias
+- ERROR: Errores
+- DEBUG: Información detallada (solo en desarrollo)
+
+## 🔒 Seguridad
+
+Para producción, recuerda:
+
+1. Cambiar `SECRET_KEY` en `.env`
+2. Cambiar contraseña de PostgreSQL
+3. Configurar CORS apropiadamente
+4. Usar HTTPS
+5. Implementar autenticación (JWT)
+6. Rate limiting
+
+## 🚢 Despliegue
+
+### Docker (próximamente)
+
+```dockerfile
+# Dockerfile incluido en futuras versiones
 ```
 
-### Ver Logs
+### Servicios cloud:
+
+- **Render**: Deploy directo desde Git
+- **Railway**: PostgreSQL + FastAPI automático
+- **Heroku**: Con add-on PostgreSQL
+- **AWS EC2 + RDS**: Más control y escalabilidad
+
+## 🐛 Troubleshooting
+
+### Error: "can't connect to database"
 ```bash
-sudo docker logs geoinformatica-backend --tail 50 -f
+# Verificar que PostgreSQL está corriendo
+sudo systemctl status postgresql
+
+# Verificar credenciales en .env
+cat .env | grep DB_
 ```
 
-### Reiniciar Backend
+### Error: "modelo no encontrado"
 ```bash
-sudo docker compose restart backend
+# Verificar ruta del modelo en .env
+ls -lh ../autocorrelacion_espacial/semana4_recoleccion_datos/modelo_rf_*.pkl
 ```
 
-## 📊 Sistema de Recomendaciones
+### Error: "PostGIS not found"
+```bash
+# Instalar PostGIS en Ubuntu/Debian
+sudo apt install postgresql-14-postgis-3
 
-El backend implementa un algoritmo de scoring que combina:
+# O crear extensión manualmente
+psql -U postgres -d inmobiliario_db -c "CREATE EXTENSION postgis;"
+```
 
-1. **Filtros obligatorios:**
-   - Presupuesto (min/max)
-   - Número de dormitorios
-   - Tipo de inmueble
-   - Comuna
+## 📚 Documentación adicional
 
-2. **Scoring multi-criterio:**
-   - Precio (normalizado)
-   - Ubicación (distancias)
-   - Características (habitaciones, baños, m²)
-   - Accesibilidad (transporte, educación, salud)
-   - Ambiente (áreas verdes, ruido, contaminación)
+- **FastAPI**: https://fastapi.tiangolo.com/
+- **SQLAlchemy**: https://docs.sqlalchemy.org/
+- **PostGIS**: https://postgis.net/documentation/
+- **Scikit-learn**: https://scikit-learn.org/
 
-3. **Normalización de pesos:**
-   - Suma de pesos = 1.0 (exacto)
-   - Algoritmo garantiza consistencia matemática
+## 🤝 Contribuir
 
-## 🔐 Seguridad
+1. Fork el proyecto
+2. Crea una rama: `git checkout -b feature/nueva-funcionalidad`
+3. Commit: `git commit -m 'Add nueva funcionalidad'`
+4. Push: `git push origin feature/nueva-funcionalidad`
+5. Pull Request
 
-- CORS configurado para frontend local
-- Variables de entorno para secretos
-- Volumen read-only para código en producción
-- Healthchecks automáticos
+## 📄 Licencia
 
-## 📝 Notas de Migración
+MIT License - Proyecto educativo
 
-**Fecha:** 2 de noviembre de 2025
+## 👨‍💻 Autor
 
-Este backend fue migrado desde `backend-inmobiliario/` a `geo-proyect-backend/` para mantener consistencia con la estructura del proyecto. Todos los archivos y funcionalidades se mantienen intactos.
+Felipe Baeza
+- Proyecto: Geoinformática - Análisis Espacial Inmobiliario
+- Universidad: [Tu Universidad]
+- Fecha: Noviembre 2025
 
-**Cambios en docker-compose.yml:**
-- ✅ `context: ./geo-proyect-backend`
-- ✅ `volumes: ./geo-proyect-backend/app:/app/app:ro`
-- ✅ `volumes: ./geo-proyect-backend/init-db.sql:...`
+## 🎯 Próximos pasos
 
-## 📚 Documentación Interactiva
-
-Accede a la documentación automática de FastAPI:
-
-- **Swagger UI:** http://localhost:8000/docs
-- **ReDoc:** http://localhost:8000/redoc
+- [ ] Agregar autenticación JWT
+- [ ] Implementar caché (Redis)
+- [ ] Tests unitarios completos
+- [ ] Dockerizar aplicación
+- [ ] Frontend con React/Vue
+- [ ] Análisis SHAP para interpretabilidad
+- [ ] API de mapas interactivos
+- [ ] Webhooks para notificaciones
+- [ ] Búsqueda geoespacial (propiedades cercanas)
 
 ---
 
-**Versión:** 1.0.0  
-**Estado:** ✅ Operativo  
-**Puerto:** 8000  
-**Contenedor:** geoinformatica-backend
+**¿Necesitas ayuda?** Abre un issue o contacta al autor.

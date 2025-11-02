@@ -31,7 +31,7 @@ wheels/
 *.swo
 *~
 
-# Environment (Docker usa docker-compose.yml)
+# Environment
 .env
 .env.local
 .env.*.local
@@ -45,21 +45,6 @@ htmlcov/
 *.db
 *.sqlite3
 
-# Logs (Docker genera sus propios logs)
+# Logs
 *.log
 logs/
-
-# Scripts de desarrollo local
-install.sh
-run.sh
-
-# Documentación
-README.md
-
-# Git
-.git/
-.gitignore
-
-# Scripts ejecutados (datos ya en DB)
-scripts/cargar_propiedades.py
-scripts/generar_sql_carga.py

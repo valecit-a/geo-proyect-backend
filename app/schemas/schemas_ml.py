@@ -331,12 +331,12 @@ class PropiedadRecomendadaML(BaseModel):
     direccion: str
     comuna: str
     precio: float
-    superficie_util: float
+    superficie_util: Optional[float] = 0.0
     dormitorios: int
     banos: int
-    estacionamientos: int
-    latitud: float
-    longitud: float
+    estacionamientos: Optional[int] = 0
+    latitud: Optional[float] = 0.0
+    longitud: Optional[float] = 0.0
     
     # Scoring
     score_total: float = Field(..., ge=0, le=100, description="Score total (0-100)")
