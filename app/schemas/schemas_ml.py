@@ -188,10 +188,10 @@ class PreferenciasDetalladas(BaseModel):
     """Preferencias detalladas del usuario - Sistema avanzado"""
     
     # ===== HARD CONSTRAINTS (Filtros obligatorios) =====
-    precio_min: Optional[float] = Field(None, gt=0, description="Precio mínimo en CLP")
-    precio_max: Optional[float] = Field(None, gt=0, description="Precio máximo en CLP")
+    precio_min: Optional[float] = Field(None, description="Precio mínimo en UF")
+    precio_max: Optional[float] = Field(None, description="Precio máximo en UF")
     
-    superficie_min: Optional[float] = Field(None, gt=0, description="Superficie útil mínima en m²")
+    superficie_min: Optional[float] = Field(None, description="Superficie útil mínima en m²")
     superficie_max: Optional[float] = Field(None, description="Superficie útil máxima en m²")
     
     dormitorios_min: Optional[int] = Field(None, ge=1, le=10, description="Mínimo número de dormitorios")
@@ -223,6 +223,21 @@ class PreferenciasDetalladas(BaseModel):
     peso_servicios: float = Field(0.08, ge=0, le=1, description="Peso global de servicios")
     peso_areas_verdes: float = Field(0.05, ge=0, le=1, description="Peso global de áreas verdes")
     peso_edificio: float = Field(0.12, ge=0, le=1, description="Peso global de características del edificio")
+    
+    @validator('precio_min', 'precio_max', 'superficie_min', 'superficie_max')
+    def validar_valores_positivos(cls, v):
+        """Valida que los valores numéricos sean positivos si están presentes"""
+        if v is not None and v <= 0:
+            raise ValueError(f'El valor debe ser mayor que 0 si se proporciona')
+        return v
+    
+    @validator('precio_max')
+    def validar_rango_precio(cls, v, values):
+        """Valida que precio_max sea mayor que precio_min"""
+        if v is not None and values.get('precio_min') is not None:
+            if v <= values.get('precio_min'):
+                raise ValueError('precio_max debe ser mayor que precio_min')
+        return v
     
     @validator('peso_edificio')
     def validar_suma_pesos(cls, v, values):
