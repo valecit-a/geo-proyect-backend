@@ -15,11 +15,22 @@ from app.schemas.schemas import (
     ComunaStats, HealthCheck
 )
 from app.schemas.schemas_ml import PreferenciasDetalladas, RecomendacionesResponseML
+from app.schemas.schemas_prediccion import (
+    PrediccionRequest, PrediccionResponse, ModeloInfo
+)
 from app.models.models import Propiedad, Comuna
 from app.services.recommendation_ml_service import RecommendationMLService
+from app.services.ml_prediccion_service import MLPrediccionService
 
 # Router principal
 router = APIRouter()
+
+# Instanciar servicio de predicción ML (singleton)
+try:
+    ml_prediccion_service = MLPrediccionService()
+except Exception as e:
+    logger.warning(f"⚠️  No se pudo inicializar MLPrediccionService: {e}")
+    ml_prediccion_service = None
 
 
 # ============================================================================
@@ -303,6 +314,178 @@ def recomendar_propiedades_ml(
         
         return response
         
+    except Exception as e:
+        logger.error(f"❌ Error en recomendaciones ML: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error generando recomendaciones ML: {str(e)}"
+        )
+
+
+# ============================================================================
+# PREDICCIÓN DE PRECIOS (Modelos Semana 3)
+# ============================================================================
+
+@router.post(
+    "/predecir-precio",
+    response_model=PrediccionResponse,
+    tags=["Predicción ML"],
+    summary="Predice precio por m² usando modelos de Semana 3",
+    description="""
+    Predice el precio por m² de una propiedad usando el sistema avanzado de:
+    
+    - **Random Forest Global** (baseline)
+    - **GWRF por Cluster** (modelos locales por zona espacial)
+    - **GWRF por Densidad** (modelos por nivel de urbanización)
+    - **Stacking** (meta-modelo que combina los anteriores) - **MEJOR R²=0.489**
+    
+    **Features utilizadas:**
+    - Características físicas: superficie, dormitorios, baños, estacionamientos, bodegas
+    - Features derivadas: m2/habitante, total habitaciones, ratio baño/dormitorio
+    - **42 densidades espaciales** calculadas automáticamente desde lat/lon
+    
+    **Confianza del modelo:**
+    - 0.0 - 0.3: Baja (usar con precaución)
+    - 0.3 - 0.7: Media
+    - 0.7 - 1.0: Alta
+    
+    **Ejemplo de uso:**
+    ```json
+    {
+      "superficie_util": 85.0,
+      "dormitorios": 3,
+      "banos": 2,
+      "estacionamientos": 1,
+      "bodegas": 1,
+      "latitud": -33.4489,
+      "longitud": -70.6693,
+      "usar_stacking": true
+    }
+    ```
+    """
+)
+def predecir_precio(request: PrediccionRequest):
+    """
+    Predice el precio por m² de una propiedad.
+    
+    El sistema calcula automáticamente:
+    - Features derivadas (m2_por_habitante, etc.)
+    - 42 densidades espaciales usando lat/lon
+    - Predicción con modelo stacking (mejor R²=0.489)
+    
+    Args:
+        request: Datos de la propiedad (superficie, dormitorios, baños, ubicación)
+    
+    Returns:
+        PrediccionResponse: Precio predicho + confianza + detalles
+    """
+    try:
+        logger.info(f"🏠 Solicitud predicción de precio")
+        logger.info(f"   Superficie: {request.superficie_util}m², Dorms: {request.dormitorios}, Baños: {request.banos}")
+        logger.info(f"   Ubicación: ({request.latitud}, {request.longitud})")
+        
+        # Validar que el servicio esté disponible
+        if ml_prediccion_service is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Servicio de predicción ML no disponible. Modelos no cargados."
+            )
+        
+        # Realizar predicción
+        resultado = ml_prediccion_service.predecir_precio_m2(
+            superficie_util=request.superficie_util,
+            dormitorios=request.dormitorios,
+            banos=request.banos,
+            estacionamientos=request.estacionamientos,
+            bodegas=request.bodegas,
+            latitud=request.latitud,
+            longitud=request.longitud,
+            cant_max_habitantes=request.cant_max_habitantes,
+            usar_stacking=request.usar_stacking
+        )
+        
+        logger.info(f"✅ Predicción: UF {resultado['precio_m2_predicho']}/m² "
+                   f"(Total: UF {resultado['precio_total_estimado']:,.0f}) "
+                   f"| Confianza: {resultado['confianza']:.2f} "
+                   f"| Método: {resultado['metodo']}")
+        
+        return PrediccionResponse(**resultado)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error en predicción: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al predecir precio: {str(e)}"
+        )
+
+
+@router.get(
+    "/modelo-info",
+    response_model=ModeloInfo,
+    tags=["Predicción ML"],
+    summary="Información sobre modelos ML cargados"
+)
+def obtener_info_modelo():
+    """
+    Retorna información sobre los modelos ML disponibles.
+    
+    Útil para verificar qué modelos están cargados y sus métricas.
+    """
+    try:
+        if ml_prediccion_service is None:
+            return ModeloInfo(
+                modelos_disponibles={
+                    "stacking": False,
+                    "gwrf_cluster": False,
+                    "gwrf_densidad": False
+                },
+                version="1.0.0"
+            )
+        
+        # Verificar qué modelos están disponibles
+        modelos_disponibles = {
+            "stacking": ml_prediccion_service.meta_model is not None,
+            "gwrf_cluster": bool(ml_prediccion_service.modelos_cluster),
+            "gwrf_densidad": False  # Por ahora no implementado
+        }
+        
+        # Métricas de los modelos (de la documentación de Semana 3)
+        metricas = {
+            "stacking": {
+                "r2": 0.489,
+                "rmse": 25288.0,
+                "mae": 4173.0
+            },
+            "gwrf_cluster": {
+                "r2": 0.039,
+                "rmse": 34677.0,
+                "mae": 4719.0
+            },
+            "rf_global": {
+                "r2": 0.028,
+                "rmse": 34876.0,
+                "mae": 4839.0
+            }
+        }
+        
+        return ModeloInfo(
+            modelos_disponibles=modelos_disponibles,
+            version="1.0.0",
+            metricas=metricas
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Error obteniendo info de modelo: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al obtener información del modelo: {str(e)}"
+        )
     except Exception as e:
         logger.error(f"❌ Error en recomendaciones ML: {str(e)}")
         import traceback
