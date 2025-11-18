@@ -12,13 +12,14 @@ from loguru import logger
 from app.database import get_db
 from app.schemas.schemas import (
     PropiedadCreate, PropiedadResponse,
-    ComunaStats, HealthCheck
+    ComunaStats, HealthCheck,
+    PuntosInteresCercanosResponse, PuntoInteresResponse
 )
 from app.schemas.schemas_ml import PreferenciasDetalladas, RecomendacionesResponseML
 from app.schemas.schemas_prediccion import (
     PrediccionRequest, PrediccionResponse, ModeloInfo
 )
-from app.models.models import Propiedad, Comuna
+from app.models.models import Propiedad, Comuna, PuntoInteres
 from app.services.recommendation_ml_service import RecommendationMLService
 from app.services.ml_prediccion_service import MLPrediccionService
 
@@ -485,6 +486,153 @@ def obtener_info_modelo():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al obtener información del modelo: {str(e)}"
+        )
+
+
+# ============================================================================
+# PUNTOS DE INTERÉS / SERVICIOS CERCANOS
+# ============================================================================
+
+@router.get(
+    "/puntos-interes/cercanos",
+    response_model=PuntosInteresCercanosResponse,
+    tags=["Puntos de Interés"],
+    summary="Obtiene puntos de interés cercanos a una ubicación"
+)
+def obtener_puntos_interes_cercanos(
+    latitud: float,
+    longitud: float,
+    radio: int = 1500,  # Radio en metros (default 1.5km)
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene todos los puntos de interés cercanos a una ubicación.
+    
+    **Parámetros:**
+    - `latitud`: Latitud de la ubicación de referencia
+    - `longitud`: Longitud de la ubicación de referencia
+    - `radio`: Radio de búsqueda en metros (default: 1500m = 1.5km)
+    
+    **Retorna:**
+    Puntos de interés organizados por tipo:
+    - Metros (estaciones de metro)
+    - Colegios (educación básica, media, superior)
+    - Centros médicos (hospitales, clínicas, consultorios)
+    - Supermercados
+    - Parques (áreas verdes)
+    - Farmacias
+    - Comisarías (seguridad)
+    - Bomberos
+    
+    Cada punto incluye su distancia en metros desde la ubicación consultada.
+    """
+    try:
+        logger.info(f"🔍 Buscando puntos de interés cerca de ({latitud}, {longitud}) - Radio: {radio}m")
+        
+        # Query con ST_DWithin para buscar dentro del radio especificado
+        # ST_DWithin usa metros cuando se trabaja con geography
+        puntos_query = db.query(
+            PuntoInteres,
+            text(f"ST_Distance(geometria::geography, ST_SetSRID(ST_MakePoint({longitud}, {latitud}), 4326)::geography) as distancia")
+        ).filter(
+            text(f"ST_DWithin(geometria::geography, ST_SetSRID(ST_MakePoint({longitud}, {latitud}), 4326)::geography, {radio})")
+        ).all()
+        
+        # Organizar por tipo
+        puntos_por_tipo = {
+            'metro': [],
+            'colegio': [],
+            'centro_medico': [],
+            'supermercado': [],
+            'parque': [],
+            'farmacia': [],
+            'comisaria': [],
+            'bombero': []
+        }
+        
+        for punto, distancia in puntos_query:
+            punto_dict = {
+                'id': punto.id,
+                'tipo': punto.tipo,
+                'nombre': punto.nombre,
+                'latitud': punto.latitud,
+                'longitud': punto.longitud,
+                'direccion': punto.direccion,
+                'distancia': round(distancia, 1)
+            }
+            
+            if punto.tipo in puntos_por_tipo:
+                puntos_por_tipo[punto.tipo].append(punto_dict)
+        
+        total = sum(len(v) for v in puntos_por_tipo.values())
+        
+        logger.info(f"✅ Encontrados {total} puntos de interés")
+        
+        return PuntosInteresCercanosResponse(
+            metros=puntos_por_tipo['metro'],
+            colegios=puntos_por_tipo['colegio'],
+            centros_medicos=puntos_por_tipo['centro_medico'],
+            supermercados=puntos_por_tipo['supermercado'],
+            parques=puntos_por_tipo['parque'],
+            farmacias=puntos_por_tipo['farmacia'],
+            comisarias=puntos_por_tipo['comisaria'],
+            bomberos=puntos_por_tipo['bombero'],
+            total_encontrados=total
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Error obteniendo puntos de interés: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al obtener puntos de interés: {str(e)}"
+        )
+
+
+@router.get(
+    "/puntos-interes/tipo/{tipo}",
+    response_model=List[PuntoInteresResponse],
+    tags=["Puntos de Interés"],
+    summary="Obtiene todos los puntos de interés de un tipo específico"
+)
+def obtener_puntos_por_tipo(
+    tipo: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene todos los puntos de interés de un tipo específico.
+    
+    **Tipos disponibles:**
+    - metro
+    - colegio
+    - centro_medico
+    - supermercado
+    - parque
+    - farmacia
+    - comisaria
+    - bombero
+    """
+    try:
+        puntos = db.query(PuntoInteres).filter(PuntoInteres.tipo == tipo).all()
+        
+        return [
+            PuntoInteresResponse(
+                id=p.id,
+                tipo=p.tipo,
+                nombre=p.nombre,
+                latitud=p.latitud,
+                longitud=p.longitud,
+                direccion=p.direccion
+            )
+            for p in puntos
+        ]
+        
+    except Exception as e:
+        logger.error(f"❌ Error obteniendo puntos de tipo {tipo}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al obtener puntos de tipo {tipo}: {str(e)}"
         )
     except Exception as e:
         logger.error(f"❌ Error en recomendaciones ML: {str(e)}")

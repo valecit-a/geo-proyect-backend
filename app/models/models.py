@@ -139,3 +139,34 @@ class Propiedad(Base):
     
     # Relaciones
     comuna = relationship("Comuna", back_populates="propiedades")
+
+
+# ============================================================================
+# PUNTOS DE INTERÉS / SERVICIOS
+# ============================================================================
+
+class PuntoInteres(Base):
+    """Tabla base para puntos de interés / servicios"""
+    __tablename__ = "puntos_interes"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tipo = Column(String(50), nullable=False, index=True)  # 'metro', 'colegio', etc.
+    nombre = Column(String(200), nullable=False)
+    direccion = Column(String(300))
+    
+    # Ubicación
+    latitud = Column(Float, nullable=False)
+    longitud = Column(Float, nullable=False)
+    geometria = Column(Geometry('POINT', srid=4326))
+    
+    # Información adicional
+    descripcion = Column(Text)
+    telefono = Column(String(50))
+    horario = Column(String(200))
+    
+    # Metadata
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    def __repr__(self):
+        return f"<PuntoInteres {self.tipo}: {self.nombre}>"

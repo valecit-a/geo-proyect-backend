@@ -200,3 +200,38 @@ class PreferenciasUrbanas(BaseModel):
 
 # Resolver forward refs (ruido y urbanas se referenciaban antes de ser declaradas)
 PreferenciasUsuario.update_forward_refs()
+
+
+# ============================================================================
+# SCHEMAS DE PUNTOS DE INTERÉS
+# ============================================================================
+
+class PuntoInteresBase(BaseModel):
+    """Schema base para punto de interés"""
+    tipo: str
+    nombre: str
+    latitud: float
+    longitud: float
+    direccion: Optional[str] = None
+    distancia: Optional[float] = None  # Distancia en metros desde punto de consulta
+
+
+class PuntoInteresResponse(PuntoInteresBase):
+    """Schema de respuesta para punto de interés"""
+    id: int
+    
+    class Config:
+        from_attributes = True
+
+
+class PuntosInteresCercanosResponse(BaseModel):
+    """Schema de respuesta para puntos de interés cercanos"""
+    metros: List[PuntoInteresResponse] = []
+    colegios: List[PuntoInteresResponse] = []
+    centros_medicos: List[PuntoInteresResponse] = []
+    supermercados: List[PuntoInteresResponse] = []
+    parques: List[PuntoInteresResponse] = []
+    farmacias: List[PuntoInteresResponse] = []
+    comisarias: List[PuntoInteresResponse] = []
+    bomberos: List[PuntoInteresResponse] = []
+    total_encontrados: int = 0
