@@ -345,7 +345,8 @@ class PropiedadRecomendadaML(BaseModel):
     id: int
     direccion: str
     comuna: str
-    precio: float
+    precio: float  # Siempre en CLP (normalizado desde el backend)
+    divisa: str = 'CLP'  # Divisa normalizada
     superficie_util: Optional[float] = 0.0
     dormitorios: int
     banos: int

@@ -16,6 +16,7 @@ from app.schemas.schemas_ml import (
     FeedbackPropiedad,
     HistorialBusqueda
 )
+from app.utils.currency import uf_to_clp, VALOR_UF_CLP
 
 
 class RecommendationMLService:
@@ -25,6 +26,32 @@ class RecommendationMLService:
         self.db = db
         self.comunas_map = self._cargar_comunas()
         self.modelo_version = "v2.0_ML_detallado"
+    
+    def _normalizar_precio_a_clp(self, precio: float, divisa: str) -> float:
+        """Normaliza cualquier precio a CLP
+        
+        Args:
+            precio: Valor del precio
+            divisa: 'pesos', 'CLP', 'UF', 'undefined', etc.
+            
+        Returns:
+            Precio en CLP
+        """
+        if not precio:
+            return 0.0
+            
+        divisa_lower = (divisa or 'pesos').lower()
+        
+        # Si ya está en pesos/CLP, retornar tal cual
+        if divisa_lower in ['pesos', 'clp', 'peso']:
+            return precio
+        
+        # Si es UF o undefined con valores pequeños (< 10000), asumir UF
+        if divisa_lower in ['uf', 'undefined', 'none'] and precio < 10000:
+            return uf_to_clp(precio)
+        
+        # Para valores grandes, asumir que ya están en CLP
+        return precio
     
     def _cargar_comunas(self) -> Dict[int, str]:
         """Carga mapa de IDs a nombres de comunas"""
@@ -73,11 +100,15 @@ class RecommendationMLService:
             prop = resultado['propiedad']
             comuna_nombre = self.comunas_map.get(prop.comuna_id, 'Desconocida')
             
+            # Normalizar precio a CLP
+            precio_clp = self._normalizar_precio_a_clp(prop.precio, prop.divisa)
+            
             recomendacion = PropiedadRecomendadaML(
                 id=prop.id,
                 direccion=prop.direccion or f"Propiedad {prop.id}",
                 comuna=comuna_nombre,
-                precio=prop.precio,
+                precio=precio_clp,
+                divisa='CLP',
                 superficie_util=prop.superficie_util or 0.0,
                 dormitorios=prop.dormitorios or 0,
                 banos=prop.banos or 0,
