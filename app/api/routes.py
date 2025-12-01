@@ -1,6 +1,6 @@
 """
 Endpoints de la API
-Rutas para recomendaciones, propiedades, comunas, etc.
+Rutas para recomendaciones, propiedades, comunas, predicción de precios y satisfacción.
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -19,9 +19,15 @@ from app.schemas.schemas_ml import PreferenciasDetalladas, RecomendacionesRespon
 from app.schemas.schemas_prediccion import (
     PrediccionRequest, PrediccionResponse, ModeloInfo
 )
+from app.schemas.schemas_satisfaccion import (
+    SatisfaccionRequest, SatisfaccionResponse, 
+    ComparacionRequest, ComparacionResponse,
+    ModeloSatisfaccionInfo, PropiedadRanking
+)
 from app.models.models import Propiedad, Comuna, PuntoInteres
 from app.services.recommendation_ml_service import RecommendationMLService
 from app.services.ml_prediccion_service import MLPrediccionService
+from app.services.satisfaccion_service import get_satisfaccion_service, SatisfaccionService
 
 # Router principal
 router = APIRouter()
@@ -32,6 +38,9 @@ try:
 except Exception as e:
     logger.warning(f"⚠️  No se pudo inicializar MLPrediccionService: {e}")
     ml_prediccion_service = None
+
+# Instanciar servicio de satisfacción (singleton)
+satisfaccion_service = get_satisfaccion_service()
 
 
 # ============================================================================
@@ -640,7 +649,224 @@ def obtener_puntos_por_tipo(
         logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error generando recomendaciones ML: {str(e)}"
+            detail=f"Error al predecir satisfacción: {str(e)}"
         )
 
+
+@router.get(
+    "/satisfaccion-info",
+    response_model=ModeloSatisfaccionInfo,
+    tags=["Predicción Satisfacción"],
+    summary="Información sobre el modelo de satisfacción"
+)
+def obtener_info_satisfaccion():
+    """
+    Retorna información sobre el modelo de satisfacción cargado.
+    
+    Útil para verificar:
+    - Si el modelo está disponible
+    - Métricas de rendimiento (R², RMSE, MAE)
+    - Comunas y tipos de propiedad válidos
+    """
+    try:
+        if satisfaccion_service is None:
+            return ModeloSatisfaccionInfo(
+                modelo_tipo="N/A",
+                modelo_disponible=False,
+                num_features=0,
+                metricas={"r2_test": None, "rmse_test": None, "mae_test": None},
+                comunas_validas=[],
+                tipos_validos=[],
+                version="1.0.0"
+            )
+        
+        info = satisfaccion_service.get_info()
+        
+        return ModeloSatisfaccionInfo(
+            modelo_tipo=info['modelo_tipo'],
+            modelo_disponible=True,
+            num_features=info['num_features'],
+            metricas=info['metricas'],
+            comunas_validas=info['comunas_validas'],
+            tipos_validos=info['tipos_validos'],
+            version=info['version']
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Error obteniendo info de satisfacción: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al obtener información del modelo: {str(e)}"
+        )
+
+
+@router.post(
+    "/predecir-satisfaccion",
+    response_model=SatisfaccionResponse,
+    tags=["Predicción Satisfacción"],
+    summary="Predice satisfacción residencial para una propiedad"
+)
+def predecir_satisfaccion_endpoint(request: SatisfaccionRequest):
+    """
+    Predice la satisfacción residencial de una propiedad.
+    
+    El modelo LightGBM (R²=0.8635) considera:
+    - Características físicas: superficie, dormitorios, baños
+    - Precio: valor en UF y precio por m²
+    - Ubicación: comuna (Santiago, Ñuñoa, La Reina, Estación Central)
+    - Tipo: departamento o casa
+    
+    Retorna:
+    - Satisfacción: valor 0-10
+    - Nivel: Excelente/Bueno/Regular/Bajo
+    - Factores relevantes para el usuario
+    - Confianza del modelo
+    """
+    try:
+        if satisfaccion_service is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Servicio de satisfacción no disponible"
+            )
+        
+        # Normalizar comuna
+        comuna_map = {
+            "nunoa": "Ñuñoa",
+            "nñuoa": "Ñuñoa",
+            "ñuñoa": "Ñuñoa",
+            "santiago": "Santiago",
+            "la_reina": "La Reina",
+            "la reina": "La Reina",
+            "estacion_central": "Estación Central",
+            "estacion central": "Estación Central"
+        }
+        comuna = request.comuna.value if hasattr(request.comuna, 'value') else str(request.comuna)
+        comuna_normalizada = comuna_map.get(comuna.lower(), comuna)
+        
+        # Preparar distancias si están disponibles
+        distancias = {}
+        if request.dist_transporte_min_m is not None:
+            distancias['dist_transporte_min_m'] = request.dist_transporte_min_m
+        
+        # Obtener tipo de propiedad
+        tipo = request.tipo_propiedad.value if hasattr(request.tipo_propiedad, 'value') else str(request.tipo_propiedad)
+        
+        # Llamar al servicio
+        resultado = satisfaccion_service.predecir_satisfaccion(
+            superficie_util=request.superficie_util,
+            dormitorios=request.dormitorios,
+            banos=request.banos,
+            precio_uf=request.precio_uf,
+            comuna=comuna_normalizada,
+            tipo_propiedad=tipo,
+            latitud=request.latitud,
+            longitud=request.longitud,
+            distancias=distancias if distancias else None
+        )
+        
+        return SatisfaccionResponse(**resultado)
+        
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"❌ Error prediciendo satisfacción: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al predecir satisfacción: {str(e)}"
+        )
+
+
+@router.post(
+    "/comparar-propiedades",
+    response_model=ComparacionResponse,
+    tags=["Predicción Satisfacción"],
+    summary="Compara múltiples propiedades por satisfacción"
+)
+def comparar_propiedades(request: ComparacionRequest):
+    """
+    Compara múltiples propiedades y genera un ranking por satisfacción.
+    
+    Útil para:
+    - Comparar opciones de compra
+    - Encontrar la mejor opción entre varias alternativas
+    - Evaluar propiedades en diferentes comunas/precios
+    
+    Args:
+        request: Lista de 2-20 propiedades a comparar
+    
+    Returns:
+        ComparacionResponse: Ranking ordenado + mejor opción + promedio
+    """
+    try:
+        logger.info(f"📊 Comparando {len(request.propiedades)} propiedades")
+        
+        if satisfaccion_service is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Servicio de satisfacción no disponible."
+            )
+        
+        # Convertir requests a dicts
+        propiedades_dict = []
+        for i, prop in enumerate(request.propiedades):
+            propiedades_dict.append({
+                'id': i + 1,
+                'direccion': f'Propiedad {i + 1}',
+                'superficie_util': prop.superficie_util,
+                'dormitorios': prop.dormitorios,
+                'banos': prop.banos,
+                'precio_uf': prop.precio_uf,
+                'comuna': prop.comuna.value,
+                'tipo_propiedad': prop.tipo_propiedad.value,
+            })
+        
+        # Comparar
+        df_ranking = satisfaccion_service.comparar_propiedades(propiedades_dict)
+        
+        if df_ranking.empty:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error al procesar las propiedades"
+            )
+        
+        # Construir respuesta
+        ranking = []
+        for _, row in df_ranking.iterrows():
+            ranking.append(PropiedadRanking(
+                ranking=int(row['ranking']),
+                id=int(row['id']),
+                direccion=row['direccion'],
+                satisfaccion=round(row['satisfaccion'], 2),
+                nivel=row['nivel'],
+                emoji=row['emoji'],
+                precio_uf=float(row['precio_uf']),
+                superficie=float(row['superficie']),
+                dormitorios=int(row['dormitorios']),
+                banos=int(row['banos']),
+                comuna=row['comuna'],
+                tipo=row['tipo']
+            ))
+        
+        return ComparacionResponse(
+            total_comparadas=len(ranking),
+            ranking=ranking,
+            mejor_opcion=ranking[0],
+            promedio_satisfaccion=round(df_ranking['satisfaccion'].mean(), 2)
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error en comparación: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al comparar propiedades: {str(e)}"
+        )
 

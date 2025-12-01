@@ -1,12 +1,37 @@
-# 🏠 Backend Inmobiliario - API de Predicción de Precios
+# 🏠 Backend Inmobiliario - API de Predicción de Precios y Satisfacción
 
-Backend profesional en Python con FastAPI para predicción de precios inmobiliarios usando Machine Learning y datos geoespaciales.
+Backend profesional en Python con FastAPI para predicción de precios y **satisfacción residencial** usando Machine Learning y datos geoespaciales.
+
+## 🆕 Nuevo: Modelo de Satisfacción (LightGBM)
+
+Se ha integrado un nuevo modelo de predicción de satisfacción residencial:
+
+- **Algoritmo**: LightGBM
+- **R² Test**: 0.8697 (86.97% de varianza explicada)
+- **RMSE**: 0.3280
+- **Features**: 42 características (físicas, derivadas, distancias, comunas)
+- **Escala**: 0-10 (Excelente/Bueno/Regular/Bajo)
+
+### Nuevos Endpoints
+- `POST /api/v1/predecir-satisfaccion` - Predecir satisfacción de una propiedad
+- `GET /api/v1/satisfaccion-info` - Información del modelo
+- `POST /api/v1/comparar-propiedades` - Comparar múltiples propiedades
+
+### Archivos Nuevos
+- `app/services/satisfaccion_service.py` - Servicio de satisfacción
+- `app/schemas/schemas_satisfaccion.py` - Schemas Pydantic
+- `modelos/modelo_satisfaccion_venta.pkl` - Modelo LightGBM
+- `scripts/cargar_datos_propiedades.py` - Cargar datos GeoJSON
+- `scripts/migracion_satisfaccion.sql` - Migración de BD
+
+---
 
 ## 📋 Características
 
 - ✅ **API REST** con FastAPI
 - ✅ **PostgreSQL + PostGIS** para datos geoespaciales
 - ✅ **Machine Learning** con Random Forest optimizado (R² = 0.914)
+- ✅ **Satisfacción** con LightGBM (R² = 0.87) - **NUEVO**
 - ✅ **Validación de datos** con Pydantic
 - ✅ **Documentación automática** con Swagger/ReDoc
 - ✅ **Logging estructurado** con Loguru

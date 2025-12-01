@@ -1,0 +1,68 @@
+ id                          | integer
+ comuna_id                   | integer
+ direccion                   | character varying
+ latitud                     | double precision
+ longitud                    | double precision
+ geometria                   | USER-DEFINED
+ superficie_total            | double precision
+ superficie_construida       | double precision
+ dormitorios                 | integer
+ banos                       | integer
+ estacionamientos            | integer
+ dist_metro                  | double precision
+ dist_supermercado           | double precision
+ dist_area_verde             | double precision
+ dist_colegio                | double precision
+ dist_hospital               | double precision
+ dist_mall                   | double precision
+ precio                      | double precision
+ precio_log                  | double precision
+ precio_predicho             | double precision
+ precio_predicho_log         | double precision
+ fuente                      | character varying
+ url_original                | character varying
+ descripcion                 | text
+ is_outlier                  | boolean
+ is_validated                | boolean
+ created_at                  | timestamp with time zone
+ updated_at                  | timestamp with time zone
+ superficie_util             | double precision
+ superficie_terraza          | double precision
+ ambientes                   | integer
+ bodegas                     | double precision
+ cant_max_habitantes         | integer
+ tipo_departamento           | character varying
+ numero_piso_unidad          | integer
+ cantidad_pisos              | integer
+ departamentos_piso          | integer
+ gastos_comunes              | double precision
+ orientacion                 | character varying
+ dist_educacion_basica_m     | double precision
+ dist_educacion_superior_m   | double precision
+ dist_educacion_parvularia_m | double precision
+ dist_educacion_min_m        | double precision
+ dist_salud_m                | double precision
+ dist_salud_clinicas_m       | double precision
+ dist_salud_min_m            | double precision
+ dist_transporte_metro_m     | double precision
+ dist_transporte_carga_m     | double precision
+ dist_transporte_min_m       | double precision
+ dist_seguridad_pdi_m        | double precision
+ dist_seguridad_cuarteles_m  | double precision
+ dist_seguridad_bomberos_m   | double precision
+ dist_seguridad_min_m        | double precision
+ dist_areas_verdes_m         | double precision
+ dist_ocio_m                 | double precision
+ dist_turismo_m              | double precision
+ dist_comercio_m             | double precision
+ dist_servicios_publicos_m   | double precision
+ dist_servicios_sernam_m     | double precision
+ dist_puntos_interes_m       | double precision
+ divisa                      | character varying
+ titulo                      | character varying
+ codigo                      | character varying
+ fecha_publicacion           | timestamp with time zone
+ x_utm                       | double precision
+ y_utm                       | double precision
+ zona_utm                    | character varying
+
