@@ -27,7 +27,7 @@ from app.schemas.schemas_satisfaccion import (
 from app.models.models import Propiedad, Comuna, PuntoInteres
 from app.services.recommendation_ml_service import RecommendationMLService
 from app.services.ml_prediccion_service import MLPrediccionService
-from app.services.satisfaccion_service import get_satisfaccion_service, SatisfaccionService
+from app.services.satisfaccion_service import get_satisfaccion_service
 
 # Router principal
 router = APIRouter()
@@ -642,14 +642,6 @@ def obtener_puntos_por_tipo(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al obtener puntos de tipo {tipo}: {str(e)}"
-        )
-    except Exception as e:
-        logger.error(f"❌ Error en recomendaciones ML: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error al predecir satisfacción: {str(e)}"
         )
 
 

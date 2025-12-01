@@ -340,7 +340,7 @@ class ScoreML(BaseModel):
 
 
 class PropiedadRecomendadaML(BaseModel):
-    """Propiedad recomendada con scoring avanzado"""
+    """Propiedad recomendada con scoring avanzado y predicción de satisfacción LightGBM"""
     # Info básica
     id: int
     direccion: str
@@ -358,6 +358,10 @@ class PropiedadRecomendadaML(BaseModel):
     score_total: float = Field(..., ge=0, le=100, description="Score total (0-100)")
     score_confianza: float = Field(..., ge=0, le=1, description="Confianza del modelo (0-1)")
     scores_por_categoria: List[ScoreML] = Field(..., description="Desglose por categoría")
+    
+    # Satisfacción ML (LightGBM R²=0.86)
+    satisfaccion_score: Optional[float] = Field(None, ge=0, le=10, description="Satisfacción predicha por LightGBM (0-10)")
+    satisfaccion_nivel: Optional[str] = Field(None, description="Nivel de satisfacción: Excelente, Bueno, Regular, Bajo")
     
     # Explicación
     resumen_explicacion: str = Field(..., description="Resumen de por qué se recomienda")

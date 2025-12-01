@@ -23,17 +23,17 @@ echo ""
 
 # Total de propiedades
 echo -e "${BLUE}2. Total de propiedades cargadas:${NC}"
-sudo docker exec geoinformatica-db psql -U postgres -d inmobiliaria_db -c "SELECT COUNT(*) as total_propiedades FROM propiedades;"
+sudo docker exec geoinformatica-db psql -U postgres -d inmobiliario_db -c "SELECT COUNT(*) as total_propiedades FROM propiedades;"
 echo ""
 
 # Total de comunas
 echo -e "${BLUE}3. Total de comunas:${NC}"
-sudo docker exec geoinformatica-db psql -U postgres -d inmobiliaria_db -c "SELECT COUNT(*) as total_comunas FROM comunas WHERE total_propiedades > 0;"
+sudo docker exec geoinformatica-db psql -U postgres -d inmobiliario_db -c "SELECT COUNT(*) as total_comunas FROM comunas WHERE total_propiedades > 0;"
 echo ""
 
 # Top 10 comunas
 echo -e "${BLUE}4. Top 10 comunas con más propiedades:${NC}"
-sudo docker exec geoinformatica-db psql -U postgres -d inmobiliaria_db -c "
+sudo docker exec geoinformatica-db psql -U postgres -d inmobiliario_db -c "
 SELECT 
     nombre, 
     total_propiedades, 
@@ -47,7 +47,7 @@ echo ""
 
 # Rango de precios
 echo -e "${BLUE}5. Rango de precios:${NC}"
-sudo docker exec geoinformatica-db psql -U postgres -d inmobiliaria_db -c "
+sudo docker exec geoinformatica-db psql -U postgres -d inmobiliario_db -c "
 SELECT 
     ROUND(MIN(precio)::numeric, 0) as precio_min,
     ROUND(AVG(precio)::numeric, 0) as precio_promedio,
@@ -59,7 +59,7 @@ echo ""
 
 # Distribución por dormitorios
 echo -e "${BLUE}6. Distribución por dormitorios:${NC}"
-sudo docker exec geoinformatica-db psql -U postgres -d inmobiliaria_db -c "
+sudo docker exec geoinformatica-db psql -U postgres -d inmobiliario_db -c "
 SELECT 
     dormitorios,
     COUNT(*) as cantidad,
@@ -73,7 +73,7 @@ echo ""
 
 # Verificar geometrías
 echo -e "${BLUE}7. Verificando geometrías PostGIS:${NC}"
-sudo docker exec geoinformatica-db psql -U postgres -d inmobiliaria_db -c "
+sudo docker exec geoinformatica-db psql -U postgres -d inmobiliario_db -c "
 SELECT 
     COUNT(*) as con_geometria,
     (SELECT COUNT(*) FROM propiedades) - COUNT(*) as sin_geometria
@@ -84,7 +84,7 @@ echo ""
 
 # Muestra de 3 propiedades
 echo -e "${BLUE}8. Muestra de propiedades:${NC}"
-sudo docker exec geoinformatica-db psql -U postgres -d inmobiliaria_db -c "
+sudo docker exec geoinformatica-db psql -U postgres -d inmobiliario_db -c "
 SELECT 
     p.id,
     c.nombre as comuna,
@@ -106,5 +106,5 @@ echo -e "${GREEN} ✓ VERIFICACIÓN COMPLETA${NC}"
 echo "============================================================================"
 echo ""
 echo "Para consultas personalizadas, usa:"
-echo "  sudo docker exec -it geoinformatica-db psql -U postgres -d inmobiliaria_db"
+echo "  sudo docker exec -it geoinformatica-db psql -U postgres -d inmobiliario_db"
 echo ""

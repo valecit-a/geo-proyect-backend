@@ -1,11 +1,12 @@
 """
 Servicio de Recomendaciones con Machine Learning
-Sistema avanzado de scoring con preferencias detalladas y aprendizaje
+Sistema avanzado de scoring con preferencias detalladas y modelo LightGBM de satisfacción
 """
 from sqlalchemy.orm import Session
 from typing import List, Dict, Optional, Tuple
 import math
 from datetime import datetime
+from loguru import logger
 
 from app.models.models import Propiedad, Comuna
 from app.schemas.schemas_ml import (
@@ -16,16 +17,33 @@ from app.schemas.schemas_ml import (
     FeedbackPropiedad,
     HistorialBusqueda
 )
-from app.utils.currency import uf_to_clp, VALOR_UF_CLP
+from app.utils.currency import uf_to_clp, clp_to_uf, VALOR_UF_CLP
+
+# Importar servicio de satisfacción
+try:
+    from app.services.satisfaccion_service import get_satisfaccion_service
+    SATISFACCION_DISPONIBLE = True
+except ImportError:
+    SATISFACCION_DISPONIBLE = False
+    logger.warning("⚠️ SatisfaccionService no disponible")
 
 
 class RecommendationMLService:
-    """Servicio avanzado de recomendaciones con Machine Learning"""
+    """Servicio avanzado de recomendaciones con Machine Learning y modelo LightGBM de satisfacción"""
     
     def __init__(self, db: Session):
         self.db = db
         self.comunas_map = self._cargar_comunas()
-        self.modelo_version = "v2.0_ML_detallado"
+        self.modelo_version = "v3.0_LightGBM_Satisfaccion"
+        
+        # Inicializar servicio de satisfacción
+        self.satisfaccion_service = None
+        if SATISFACCION_DISPONIBLE:
+            try:
+                self.satisfaccion_service = get_satisfaccion_service()
+                logger.info("✅ Modelo LightGBM de satisfacción integrado (R²=0.86)")
+            except Exception as e:
+                logger.warning(f"⚠️ No se pudo cargar modelo de satisfacción: {e}")
     
     def _normalizar_precio_a_clp(self, precio: float, divisa: str) -> float:
         """Normaliza cualquier precio a CLP
@@ -77,7 +95,7 @@ class RecommendationMLService:
         propiedades_candidatas = self._filtrar_propiedades(preferencias)
         total_analizadas = len(propiedades_candidatas)
         
-        # 2. Scoring avanzado con ML
+        # 2. Scoring básico rápido (sin satisfacción ML)
         propiedades_con_score = []
         for propiedad in propiedades_candidatas:
             try:
@@ -85,16 +103,55 @@ class RecommendationMLService:
                 if resultado_ml['score_total'] > 0:  # Solo incluir con score positivo
                     propiedades_con_score.append(resultado_ml)
             except Exception as e:
-                print(f"Error scoring propiedad {propiedad.id}: {e}")
+                logger.debug(f"Error scoring propiedad {propiedad.id}: {e}")
                 continue
         
         # 3. Ordenar por score descendente
         propiedades_con_score.sort(key=lambda x: x['score_total'], reverse=True)
         
-        # 4. Tomar top N
-        top_propiedades = propiedades_con_score[:limit]
+        # 4. Tomar top N*2 (margen para re-ranking con satisfacción)
+        candidatas_top = propiedades_con_score[:limit * 2]
         
-        # 5. Convertir a schemas
+        # 5. Calcular satisfacción ML solo para las top candidatas
+        for resultado in candidatas_top:
+            if self.satisfaccion_service:
+                try:
+                    satisfaccion_data = self._calcular_satisfaccion_ml(resultado['propiedad'])
+                    if satisfaccion_data:
+                        resultado['satisfaccion_score'] = satisfaccion_data['satisfaccion']
+                        resultado['satisfaccion_nivel'] = satisfaccion_data['nivel']
+                        
+                        # Agregar contribución de satisfacción al score (30% del total)
+                        score_sat_normalizado = (satisfaccion_data['satisfaccion'] / 10) * 100
+                        peso_satisfaccion = 0.30
+                        resultado['score_total'] += score_sat_normalizado * peso_satisfaccion
+                        
+                        # Agregar categoría de satisfacción
+                        resultado['scores_categorias'].append(ScoreML(
+                            categoria="Satisfacción ML",
+                            score=score_sat_normalizado,
+                            peso=peso_satisfaccion,
+                            contribucion=score_sat_normalizado * peso_satisfaccion,
+                            explicacion=f"LightGBM: {satisfaccion_data['satisfaccion']:.1f}/10 ({satisfaccion_data['nivel']})",
+                            factores_positivos=[f"🤖 Predicción: {satisfaccion_data['nivel']}"],
+                            factores_negativos=[]
+                        ))
+                        
+                        # Agregar a puntos fuertes/débiles
+                        if satisfaccion_data['satisfaccion'] >= 7:
+                            resultado['puntos_fuertes'].insert(0, f"🌟 Satisfacción ML: {satisfaccion_data['satisfaccion']:.1f}/10")
+                        elif satisfaccion_data['satisfaccion'] < 4:
+                            resultado['puntos_debiles'].insert(0, f"⚠️ Satisfacción ML baja: {satisfaccion_data['satisfaccion']:.1f}/10")
+                except Exception as e:
+                    logger.debug(f"Error satisfacción para {resultado['propiedad'].id}: {e}")
+        
+        # 6. Re-ordenar con satisfacción incluida
+        candidatas_top.sort(key=lambda x: x['score_total'], reverse=True)
+        
+        # 7. Tomar top N final
+        top_propiedades = candidatas_top[:limit]
+        
+        # 8. Convertir a schemas
         recomendaciones = []
         for resultado in top_propiedades:
             prop = resultado['propiedad']
@@ -118,6 +175,8 @@ class RecommendationMLService:
                 score_total=round(resultado['score_total'], 2),
                 score_confianza=round(resultado['confianza'], 3),
                 scores_por_categoria=resultado['scores_categorias'],
+                satisfaccion_score=round(resultado.get('satisfaccion_score', 0), 2) if resultado.get('satisfaccion_score') else None,
+                satisfaccion_nivel=resultado.get('satisfaccion_nivel'),
                 resumen_explicacion=resultado['resumen'],
                 puntos_fuertes=resultado['puntos_fuertes'],
                 puntos_debiles=resultado['puntos_debiles'],
@@ -345,12 +404,15 @@ class RecommendationMLService:
             for punto in score_edificio_data['negativos'][:2]:  # Top 2
                 puntos_debiles.append(punto)
         
-        # ===== CALCULAR SCORE TOTAL =====
+        # NOTA: Satisfacción ML se calcula en recomendar_propiedades() solo para top candidatas
+        # Esto optimiza el rendimiento evitando calcular ML para todas las propiedades
+        
+        # ===== CALCULAR SCORE TOTAL (sin satisfacción, se agrega después) =====
         score_total = sum(sc.contribucion for sc in scores_categorias)
         
         # Calcular confianza (basado en disponibilidad de datos)
         campos_disponibles = 0
-        campos_totales = 8  # Actualizado de 7 a 8
+        campos_totales = 8  # Sin satisfacción ML en esta etapa
         if prop.precio: campos_disponibles += 1
         if prop.dist_transporte_metro_m: campos_disponibles += 1
         if prop.dist_educacion_min_m: campos_disponibles += 1
@@ -373,6 +435,8 @@ class RecommendationMLService:
         return {
             'propiedad': prop,
             'score_total': score_total,
+            'satisfaccion_score': 0.0,  # Se calcula después en recomendar_propiedades()
+            'satisfaccion_nivel': "N/A",  # Se calcula después en recomendar_propiedades()
             'confianza': confianza,
             'scores_categorias': scores_categorias,
             'resumen': resumen,
@@ -848,6 +912,69 @@ class RecommendationMLService:
             'positivos': positivos,
             'negativos': negativos
         }
+    
+    def _calcular_satisfaccion_ml(self, prop: Propiedad) -> Optional[Dict]:
+        """
+        Calcula la satisfacción predicha usando el modelo LightGBM (R²=0.86)
+        
+        Args:
+            prop: Propiedad a evaluar
+            
+        Returns:
+            Dict con satisfaccion (0-10), nivel, emoji, descripcion
+            None si no se puede calcular
+        """
+        if not self.satisfaccion_service:
+            return None
+        
+        # Obtener nombre de comuna
+        comuna_nombre = self.comunas_map.get(prop.comuna_id, 'Santiago')
+        
+        # Determinar tipo de propiedad
+        tipo_propiedad = 'departamento'
+        if prop.tipo_departamento:
+            tipo_lower = prop.tipo_departamento.lower()
+            if 'casa' in tipo_lower:
+                tipo_propiedad = 'casa'
+        
+        # Calcular precio en UF
+        precio_clp = self._normalizar_precio_a_clp(prop.precio, prop.divisa)
+        precio_uf = clp_to_uf(precio_clp) if precio_clp > 0 else 0
+        
+        # Preparar distancias disponibles
+        distancias = {}
+        if prop.dist_transporte_min_m:
+            distancias['dist_transporte_min_m'] = prop.dist_transporte_min_m
+        if prop.dist_transporte_metro_m:
+            distancias['dist_transporte_metro_m'] = prop.dist_transporte_metro_m
+        if prop.dist_educacion_min_m:
+            distancias['dist_educacion_min_m'] = prop.dist_educacion_min_m
+        if prop.dist_salud_min_m:
+            distancias['dist_salud_min_m'] = prop.dist_salud_min_m
+        if prop.dist_areas_verdes_m:
+            distancias['dist_areas_verdes_m'] = prop.dist_areas_verdes_m
+        if prop.dist_comercio_m:
+            distancias['dist_comercio_m'] = prop.dist_comercio_m
+        
+        try:
+            # Llamar al servicio de satisfacción
+            resultado = self.satisfaccion_service.predecir_satisfaccion(
+                superficie_util=prop.superficie_util or 50,
+                dormitorios=prop.dormitorios or 1,
+                banos=prop.banos or 1,
+                precio_uf=precio_uf if precio_uf > 0 else 3000,
+                comuna=comuna_nombre,
+                tipo_propiedad=tipo_propiedad,
+                latitud=prop.latitud,
+                longitud=prop.longitud,
+                distancias=distancias if distancias else None
+            )
+            
+            return resultado
+            
+        except Exception as e:
+            logger.debug(f"Error prediciendo satisfacción para prop {prop.id}: {e}")
+            return None
     
     def _generar_sugerencias(
         self,
