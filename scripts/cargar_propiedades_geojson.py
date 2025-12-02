@@ -46,11 +46,11 @@ def get_db_connection():
     # Intentar diferentes configuraciones
     configs = [
         # Docker interno
-        {'host': 'db', 'port': 5432, 'database': 'inmobiliario_db', 'user': 'postgres', 'password': 'felipeb222'},
+        {'host': 'db', 'port': 5432, 'database': 'inmobiliario_db', 'user': 'postgres', 'password': 'geo_pass'},
         # Docker desde host
-        {'host': 'localhost', 'port': 5432, 'database': 'inmobiliario_db', 'user': 'postgres', 'password': 'felipeb222'},
+        {'host': 'localhost', 'port': 5432, 'database': 'inmobiliario_db', 'user': 'postgres', 'password': 'geo_pass'},
         # Local
-        {'host': 'localhost', 'port': 5433, 'database': 'inmobiliario_db', 'user': 'postgres', 'password': 'felipeb222'},
+        {'host': 'localhost', 'port': 5433, 'database': 'inmobiliario_db', 'user': 'postgres', 'password': 'geo_pass'},
     ]
     
     for config in configs:

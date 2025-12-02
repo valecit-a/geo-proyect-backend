@@ -117,7 +117,7 @@ nano .env
 
 Variables principales:
 - `DB_USER=postgres`
-- `DB_PASSWORD=felipeb222`
+- `DB_PASSWORD=geo_pass`
 - `DB_NAME=inmobiliario_db`
 - `MODEL_PATH=../autocorrelacion_espacial/semana4_recoleccion_datos/modelo_rf_optimizado_20251101_175356.pkl`
 
@@ -332,7 +332,7 @@ El backend usa el modelo **Random Forest optimizado** entrenado previamente:
 1. Abrir pgAdmin
 2. Conectar a servidor: localhost:5432
 3. Usuario: postgres
-4. Contraseña: felipeb222
+4. Contraseña: geo_pass
 5. Base de datos: inmobiliario_db
 
 ### Queries útiles:
