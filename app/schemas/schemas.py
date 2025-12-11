@@ -228,10 +228,18 @@ class PuntosInteresCercanosResponse(BaseModel):
     """Schema de respuesta para puntos de interés cercanos"""
     metros: List[PuntoInteresResponse] = []
     colegios: List[PuntoInteresResponse] = []
+    universidades: List[PuntoInteresResponse] = []
     centros_medicos: List[PuntoInteresResponse] = []
     supermercados: List[PuntoInteresResponse] = []
     parques: List[PuntoInteresResponse] = []
     farmacias: List[PuntoInteresResponse] = []
     comisarias: List[PuntoInteresResponse] = []
     bomberos: List[PuntoInteresResponse] = []
+    bancos: List[PuntoInteresResponse] = []
+    restaurantes: List[PuntoInteresResponse] = []
+    correos: List[PuntoInteresResponse] = []
+    gasolineras: List[PuntoInteresResponse] = []
+    cajeros: List[PuntoInteresResponse] = []
+    otros_servicios: List[PuntoInteresResponse] = []
+    otros_comercios: List[PuntoInteresResponse] = []
     total_encontrados: int = 0

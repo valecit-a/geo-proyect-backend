@@ -3,12 +3,13 @@ Servicio de Recomendaciones con Machine Learning
 Sistema avanzado de scoring con preferencias detalladas y modelo LightGBM de satisfacción
 """
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from typing import List, Dict, Optional, Tuple
 import math
 from datetime import datetime
 from loguru import logger
 
-from app.models.models import Propiedad, Comuna
+from app.models.models import Propiedad, Comuna, PuntoInteres
 from app.schemas.schemas_ml import (
     PreferenciasDetalladas,
     PropiedadRecomendadaML,
@@ -76,6 +77,128 @@ class RecommendationMLService:
         comunas = self.db.query(Comuna).all()
         return {comuna.id: comuna.nombre for comuna in comunas}
     
+    def _calcular_distancia_haversine(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """Calcula la distancia en metros entre dos puntos usando la fórmula de Haversine"""
+        R = 6371000  # Radio de la Tierra en metros
+        
+        phi1 = math.radians(lat1)
+        phi2 = math.radians(lat2)
+        delta_phi = math.radians(lat2 - lat1)
+        delta_lambda = math.radians(lon2 - lon1)
+        
+        a = math.sin(delta_phi / 2) ** 2 + \
+            math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        
+        return R * c
+    
+    def _calcular_distancia_minima_poi(self, lat: float, lon: float, tipo_poi: str) -> Optional[float]:
+        """
+        Calcula la distancia mínima de un punto a los POIs de un tipo específico
+        
+        Args:
+            lat: Latitud de la propiedad
+            lon: Longitud de la propiedad
+            tipo_poi: Tipo de POI ('metro', 'colegio', 'universidad', 'centro_medico', etc.)
+            
+        Returns:
+            Distancia mínima en metros, o None si no hay POIs del tipo
+        """
+        try:
+            # Para metro, buscar tanto por tipo como por nombre (estaciones de metro)
+            if tipo_poi == 'metro':
+                result = self.db.execute(text("""
+                    SELECT MIN(
+                        ST_Distance(
+                            geometria::geography,
+                            ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography
+                        )
+                    ) as distancia_min
+                    FROM puntos_interes
+                    WHERE (tipo = 'metro' OR LOWER(nombre) LIKE 'metro %' OR LOWER(nombre) LIKE 'estación metro%')
+                    AND geometria IS NOT NULL
+                """), {'lat': lat, 'lon': lon}).fetchone()
+            else:
+                # Buscar POIs cercanos del tipo especificado usando PostGIS
+                result = self.db.execute(text("""
+                    SELECT MIN(
+                        ST_Distance(
+                            geometria::geography,
+                            ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography
+                        )
+                    ) as distancia_min
+                    FROM puntos_interes
+                    WHERE tipo = :tipo
+                    AND geometria IS NOT NULL
+                """), {'lat': lat, 'lon': lon, 'tipo': tipo_poi}).fetchone()
+            
+            if result and result[0] is not None:
+                return float(result[0])
+            return None
+        except Exception as e:
+            logger.debug(f"Error calculando distancia a {tipo_poi}: {e}")
+            return None
+    
+    def _enriquecer_propiedad_con_distancias(self, prop: Propiedad, pref: PreferenciasDetalladas) -> Dict[str, Optional[float]]:
+        """
+        Calcula las distancias de una propiedad a los POIs relevantes según las preferencias
+        
+        Args:
+            prop: Propiedad a enriquecer
+            pref: Preferencias del usuario
+            
+        Returns:
+            Dict con distancias calculadas
+        """
+        distancias = {}
+        
+        if not prop.latitud or not prop.longitud:
+            return distancias
+        
+        # Calcular distancia al metro si se pide transporte
+        if pref.transporte and pref.transporte.importancia_metro != 0:
+            distancias['metro'] = self._calcular_distancia_minima_poi(
+                prop.latitud, prop.longitud, 'metro'
+            )
+        
+        # Calcular distancia a colegios si se pide educación
+        if pref.educacion and pref.educacion.importancia_colegios != 0:
+            distancias['colegio'] = self._calcular_distancia_minima_poi(
+                prop.latitud, prop.longitud, 'colegio'
+            )
+        
+        # Calcular distancia a universidades si se pide
+        if pref.educacion and pref.educacion.importancia_universidades != 0:
+            distancias['universidad'] = self._calcular_distancia_minima_poi(
+                prop.latitud, prop.longitud, 'universidad'
+            )
+        
+        # Calcular distancia a centros médicos si se pide salud
+        if pref.salud and pref.salud.importancia_hospitales != 0:
+            distancias['centro_medico'] = self._calcular_distancia_minima_poi(
+                prop.latitud, prop.longitud, 'centro_medico'
+            )
+        
+        # Calcular distancia a farmacias si se pide
+        if pref.salud and pref.salud.importancia_farmacias != 0:
+            distancias['farmacia'] = self._calcular_distancia_minima_poi(
+                prop.latitud, prop.longitud, 'farmacia'
+            )
+        
+        # Calcular distancia a supermercados si se pide servicios
+        if pref.servicios and pref.servicios.importancia_supermercados != 0:
+            distancias['supermercado'] = self._calcular_distancia_minima_poi(
+                prop.latitud, prop.longitud, 'supermercado'
+            )
+        
+        # Calcular distancia a parques si se pide áreas verdes
+        if pref.areas_verdes and pref.areas_verdes.importancia_parques != 0:
+            distancias['parque'] = self._calcular_distancia_minima_poi(
+                prop.latitud, prop.longitud, 'parque'
+            )
+        
+        return distancias
+    
     def recomendar_propiedades(
         self,
         preferencias: PreferenciasDetalladas,
@@ -95,11 +218,25 @@ class RecommendationMLService:
         propiedades_candidatas = self._filtrar_propiedades(preferencias)
         total_analizadas = len(propiedades_candidatas)
         
+        # Determinar si necesitamos calcular distancias (si hay preferencias de POI)
+        necesita_distancias = (
+            preferencias.transporte is not None or
+            preferencias.educacion is not None or
+            preferencias.salud is not None or
+            preferencias.servicios is not None or
+            preferencias.areas_verdes is not None
+        )
+        
         # 2. Scoring básico rápido (sin satisfacción ML)
         propiedades_con_score = []
         for propiedad in propiedades_candidatas:
             try:
-                resultado_ml = self._calcular_score_ml(propiedad, preferencias)
+                # Calcular distancias a POIs si es necesario
+                distancias_calculadas = None
+                if necesita_distancias:
+                    distancias_calculadas = self._enriquecer_propiedad_con_distancias(propiedad, preferencias)
+                
+                resultado_ml = self._calcular_score_ml(propiedad, preferencias, distancias_calculadas)
                 if resultado_ml['score_total'] > 0:  # Solo incluir con score positivo
                     propiedades_con_score.append(resultado_ml)
             except Exception as e:
@@ -164,6 +301,7 @@ class RecommendationMLService:
                 id=prop.id,
                 direccion=prop.direccion or f"Propiedad {prop.id}",
                 comuna=comuna_nombre,
+                tipo_propiedad=prop.tipo_departamento or 'Casa',
                 precio=precio_clp,
                 divisa='CLP',
                 superficie_util=prop.superficie_util or 0.0,
@@ -172,8 +310,8 @@ class RecommendationMLService:
                 estacionamientos=prop.estacionamientos or 0,
                 latitud=prop.latitud or 0.0,
                 longitud=prop.longitud or 0.0,
-                score_total=round(resultado['score_total'], 2),
-                score_confianza=round(resultado['confianza'], 3),
+                score_total=min(100.0, max(0.0, round(resultado['score_total'], 2))),
+                score_confianza=min(1.0, max(0.0, round(resultado['confianza'], 3))),
                 scores_por_categoria=resultado['scores_categorias'],
                 satisfaccion_score=round(resultado.get('satisfaccion_score', 0), 2) if resultado.get('satisfaccion_score') else None,
                 satisfaccion_nivel=resultado.get('satisfaccion_nivel'),
@@ -250,15 +388,148 @@ class RecommendationMLService:
             if comunas_excluir_ids:
                 query = query.filter(~Propiedad.comuna_id.in_(comunas_excluir_ids))
         
-        return query.all()
+        # Filtro de tipo de inmueble (Casa/Departamento)
+        if pref.tipo_inmueble_preferido:
+            tipo_lower = pref.tipo_inmueble_preferido.lower()
+            if tipo_lower == 'casa':
+                # Filtrar solo casas
+                query = query.filter(
+                    Propiedad.tipo_departamento.ilike('%casa%')
+                )
+            elif tipo_lower in ['departamento', 'depto']:
+                # Filtrar solo departamentos (todo lo que NO sea casa)
+                query = query.filter(
+                    ~Propiedad.tipo_departamento.ilike('%casa%')
+                )
+        
+        # Obtener propiedades base
+        propiedades_base = query.all()
+        
+        # ===== FILTROS ESPACIALES BASADOS EN PREFERENCIAS DE POI =====
+        # Solo aplicar filtros espaciales si la importancia es alta (>= 7)
+        propiedades_filtradas = propiedades_base
+        
+        # Filtro por cercanía al metro (si importancia >= 7)
+        if pref.transporte and pref.transporte.importancia_metro >= 7:
+            dist_max = pref.transporte.distancia_maxima_metro_m
+            propiedades_filtradas = self._filtrar_por_cercania_poi(
+                propiedades_filtradas, 'metro', dist_max
+            )
+            logger.info(f"🚇 Filtro metro (dist_max={dist_max}m): {len(propiedades_filtradas)} propiedades")
+        
+        # Filtro por cercanía a colegios (si importancia >= 7)
+        if pref.educacion and pref.educacion.importancia_colegios >= 7:
+            dist_max = pref.educacion.distancia_maxima_colegios_m
+            propiedades_filtradas = self._filtrar_por_cercania_poi(
+                propiedades_filtradas, 'colegio', dist_max
+            )
+            logger.info(f"🏫 Filtro colegios (dist_max={dist_max}m): {len(propiedades_filtradas)} propiedades")
+        
+        # Filtro por cercanía a centros médicos (si importancia >= 7)
+        if pref.salud and pref.salud.importancia_hospitales >= 7:
+            dist_max = pref.salud.distancia_maxima_hospitales_m
+            propiedades_filtradas = self._filtrar_por_cercania_poi(
+                propiedades_filtradas, 'centro_medico', dist_max
+            )
+            logger.info(f"🏥 Filtro centros médicos (dist_max={dist_max}m): {len(propiedades_filtradas)} propiedades")
+        
+        # Filtro por cercanía a supermercados (si importancia >= 7)
+        if pref.servicios and pref.servicios.importancia_supermercados >= 7:
+            dist_max = pref.servicios.distancia_maxima_supermercados_m
+            propiedades_filtradas = self._filtrar_por_cercania_poi(
+                propiedades_filtradas, 'supermercado', dist_max
+            )
+            logger.info(f"🛒 Filtro supermercados (dist_max={dist_max}m): {len(propiedades_filtradas)} propiedades")
+        
+        return propiedades_filtradas
+    
+    def _filtrar_por_cercania_poi(
+        self, 
+        propiedades: List[Propiedad], 
+        tipo_poi: str, 
+        dist_max_m: float
+    ) -> List[Propiedad]:
+        """
+        Filtra propiedades que estén cerca de POIs de un tipo específico
+        
+        Args:
+            propiedades: Lista de propiedades a filtrar
+            tipo_poi: Tipo de POI ('metro', 'colegio', 'centro_medico', etc.)
+            dist_max_m: Distancia máxima en metros
+            
+        Returns:
+            Lista de propiedades filtradas
+        """
+        if not propiedades or dist_max_m >= 9999999:
+            return propiedades
+        
+        # Obtener IDs de propiedades que cumplen el criterio usando PostGIS
+        prop_ids = [p.id for p in propiedades]
+        
+        try:
+            # Para metro, buscar también por nombre
+            if tipo_poi == 'metro':
+                result = self.db.execute(text("""
+                    SELECT DISTINCT p.id
+                    FROM propiedades p
+                    WHERE p.id = ANY(:prop_ids)
+                    AND p.geometria IS NOT NULL
+                    AND EXISTS (
+                        SELECT 1 FROM puntos_interes poi
+                        WHERE (poi.tipo = 'metro' OR LOWER(poi.nombre) LIKE 'metro %' OR LOWER(poi.nombre) LIKE 'estación metro%')
+                        AND poi.geometria IS NOT NULL
+                        AND ST_DWithin(
+                            p.geometria::geography,
+                            poi.geometria::geography,
+                            :dist_max
+                        )
+                    )
+                """), {
+                    'prop_ids': prop_ids,
+                    'dist_max': dist_max_m
+                }).fetchall()
+            else:
+                result = self.db.execute(text("""
+                    SELECT DISTINCT p.id
+                    FROM propiedades p
+                    WHERE p.id = ANY(:prop_ids)
+                    AND p.geometria IS NOT NULL
+                    AND EXISTS (
+                        SELECT 1 FROM puntos_interes poi
+                        WHERE poi.tipo = :tipo_poi
+                        AND poi.geometria IS NOT NULL
+                        AND ST_DWithin(
+                            p.geometria::geography,
+                            poi.geometria::geography,
+                            :dist_max
+                        )
+                    )
+                """), {
+                    'prop_ids': prop_ids,
+                    'tipo_poi': tipo_poi,
+                    'dist_max': dist_max_m
+                }).fetchall()
+            
+            ids_filtrados = {row[0] for row in result}
+            return [p for p in propiedades if p.id in ids_filtrados]
+            
+        except Exception as e:
+            logger.warning(f"Error en filtro espacial para {tipo_poi}: {e}")
+            return propiedades
     
     def _calcular_score_ml(
         self, 
         prop: Propiedad, 
-        pref: PreferenciasDetalladas
+        pref: PreferenciasDetalladas,
+        distancias_calculadas: Optional[Dict[str, Optional[float]]] = None
     ) -> Dict:
         """
         Calcula score completo con ML y explicaciones detalladas
+        
+        Args:
+            prop: Propiedad a evaluar
+            pref: Preferencias del usuario
+            distancias_calculadas: Distancias precalculadas a POIs (opcional)
         
         Returns:
             Dict con score_total, confianza, scores_categorias, resumen, etc.
@@ -267,6 +538,23 @@ class RecommendationMLService:
         puntos_fuertes = []
         puntos_debiles = []
         distancias = {}
+        
+        # Usar distancias calculadas si están disponibles
+        dist_calc = distancias_calculadas or {}
+        
+        # Actualizar campos de distancia en la propiedad temporalmente
+        if dist_calc.get('metro') is not None:
+            prop.dist_transporte_metro_m = dist_calc['metro']
+        if dist_calc.get('colegio') is not None:
+            prop.dist_educacion_min_m = dist_calc['colegio']
+        if dist_calc.get('centro_medico') is not None:
+            prop.dist_salud_min_m = dist_calc['centro_medico']
+        if dist_calc.get('farmacia') is not None:
+            prop.dist_salud_m = dist_calc['farmacia']
+        if dist_calc.get('supermercado') is not None:
+            prop.dist_comercio_m = dist_calc['supermercado']
+        if dist_calc.get('parque') is not None:
+            prop.dist_areas_verdes_m = dist_calc['parque']
         
         # ===== 1. SCORE DE PRECIO =====
         score_precio_data = self._score_precio(prop, pref)

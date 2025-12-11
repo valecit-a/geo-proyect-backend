@@ -551,12 +551,20 @@ def obtener_puntos_interes_cercanos(
         puntos_por_tipo = {
             'metro': [],
             'colegio': [],
+            'universidad': [],
             'centro_medico': [],
             'supermercado': [],
             'parque': [],
             'farmacia': [],
             'comisaria': [],
-            'bombero': []
+            'bombero': [],
+            'banco': [],
+            'restaurante': [],
+            'correo': [],
+            'gasolinera': [],
+            'cajero': [],
+            'otro_servicio': [],
+            'otro_comercio': []
         }
         
         for punto, distancia in puntos_query:
@@ -570,6 +578,7 @@ def obtener_puntos_interes_cercanos(
                 'distancia': round(distancia, 1)
             }
             
+            # Solo agregar tipos que están en el diccionario (ignorar otros)
             if punto.tipo in puntos_por_tipo:
                 puntos_por_tipo[punto.tipo].append(punto_dict)
         
@@ -580,12 +589,20 @@ def obtener_puntos_interes_cercanos(
         return PuntosInteresCercanosResponse(
             metros=puntos_por_tipo['metro'],
             colegios=puntos_por_tipo['colegio'],
+            universidades=puntos_por_tipo['universidad'],
             centros_medicos=puntos_por_tipo['centro_medico'],
             supermercados=puntos_por_tipo['supermercado'],
             parques=puntos_por_tipo['parque'],
             farmacias=puntos_por_tipo['farmacia'],
             comisarias=puntos_por_tipo['comisaria'],
             bomberos=puntos_por_tipo['bombero'],
+            bancos=puntos_por_tipo['banco'],
+            restaurantes=puntos_por_tipo['restaurante'],
+            correos=puntos_por_tipo['correo'],
+            gasolineras=puntos_por_tipo['gasolinera'],
+            cajeros=puntos_por_tipo['cajero'],
+            otros_servicios=puntos_por_tipo['otro_servicio'],
+            otros_comercios=puntos_por_tipo['otro_comercio'],
             total_encontrados=total
         )
         
@@ -860,5 +877,206 @@ def comparar_propiedades(request: ComparacionRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al comparar propiedades: {str(e)}"
+        )
+
+
+# ============================================================================
+# SERVICIOS GEOJSON (Datos Originales)
+# ============================================================================
+
+import json
+import os
+from pyproj import Transformer
+import math
+
+# Path a los datos originales
+DATOS_FILTRADOS_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
+    "autocorrelacion_espacial", "semana1_preparacion_datos", "datos_originales", "datos_filtrados"
+)
+
+# Mapeo de archivos GeoJSON a categorías de servicios
+GEOJSON_MAPPING = {
+    "areas_verdes": "areas_verdes_filtradas.geojson",
+    "educacion_escolar": "establecimientos_educacion_escolar.geojson",
+    "educacion_superior": "establecimientos_educacion_superior.geojson",
+    "parvularia": "establecimientos_parvularia_filtrados.geojson",
+    "salud": "puntos_medicos_farmacias_hospitales_filtrados.geojson",
+    "clinicas": "redes_de_clinicas_filtradas.geojson",
+    "cuarteles": "cuarteles_filtrados.geojson",
+    "bomberos": "cuerpos_de_bomberos_filtrados.geojson",
+    "pdi": "unidades_operativas_pdi_filtradas.geojson",
+    "ocio": "ocio_filtrado.geojson",
+    "tiendas": "tiendas_filtradas.geojson",
+    "servicios": "servicios_filtrados.geojson",
+    "turismo": "atracciones_turisticas_filtradas.geojson",
+    "metro": "Lineas_de_metro_de_Santiago.geojson",
+}
+
+
+def calcular_distancia_haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calcula distancia en metros usando fórmula de Haversine"""
+    R = 6371000  # Radio de la Tierra en metros
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    
+    a = math.sin(delta_phi/2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda/2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    
+    return R * c
+
+
+def cargar_geojson_filtrado(categoria: str, lat_centro: float, lon_centro: float, radio_m: int) -> list:
+    """Carga y filtra puntos de un archivo GeoJSON dentro de un radio"""
+    
+    if categoria not in GEOJSON_MAPPING:
+        return []
+    
+    archivo = os.path.join(DATOS_FILTRADOS_PATH, GEOJSON_MAPPING[categoria])
+    
+    if not os.path.exists(archivo):
+        logger.warning(f"Archivo no encontrado: {archivo}")
+        return []
+    
+    try:
+        with open(archivo, 'r', encoding='utf-8') as f:
+            geojson_data = json.load(f)
+        
+        # Determinar si necesitamos transformar coordenadas (EPSG:3857 -> EPSG:4326)
+        crs = geojson_data.get('crs', {}).get('properties', {}).get('name', '')
+        necesita_transformar = '3857' in crs
+        
+        if necesita_transformar:
+            transformer = Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True)
+        
+        puntos_filtrados = []
+        
+        for feature in geojson_data.get('features', []):
+            geometry = feature.get('geometry', {})
+            properties = feature.get('properties', {})
+            
+            # Obtener coordenadas según el tipo de geometría
+            geom_type = geometry.get('type', '')
+            coords = geometry.get('coordinates', [])
+            
+            if geom_type == 'Point':
+                x, y = coords[0], coords[1]
+            elif geom_type == 'MultiPolygon':
+                # Para polígonos, usar centroide aproximado (primer punto)
+                try:
+                    x, y = coords[0][0][0][0], coords[0][0][0][1]
+                except (IndexError, TypeError):
+                    continue
+            elif geom_type == 'Polygon':
+                try:
+                    x, y = coords[0][0][0], coords[0][0][1]
+                except (IndexError, TypeError):
+                    continue
+            elif geom_type == 'MultiLineString' or geom_type == 'LineString':
+                try:
+                    if geom_type == 'MultiLineString':
+                        x, y = coords[0][0][0], coords[0][0][1]
+                    else:
+                        x, y = coords[0][0], coords[0][1]
+                except (IndexError, TypeError):
+                    continue
+            else:
+                continue
+            
+            # Transformar si es necesario
+            if necesita_transformar:
+                lon, lat = transformer.transform(x, y)
+            else:
+                lon, lat = x, y
+            
+            # Calcular distancia
+            distancia = calcular_distancia_haversine(lat_centro, lon_centro, lat, lon)
+            
+            # Filtrar por radio
+            if distancia <= radio_m:
+                nombre = properties.get('nombre', properties.get('NOMBRE', 
+                          properties.get('name', properties.get('clase', 
+                          properties.get('tipo', f'{categoria}')))))
+                
+                puntos_filtrados.append({
+                    'id': properties.get('FID', properties.get('id', len(puntos_filtrados))),
+                    'tipo': categoria,
+                    'nombre': str(nombre) if nombre else categoria,
+                    'latitud': lat,
+                    'longitud': lon,
+                    'distancia': round(distancia, 1),
+                    'propiedades': {k: str(v) for k, v in properties.items() if k not in ['FID', 'id']}
+                })
+        
+        return puntos_filtrados
+        
+    except Exception as e:
+        logger.error(f"Error cargando GeoJSON {categoria}: {e}")
+        return []
+
+
+@router.get(
+    "/servicios-geojson/cercanos",
+    tags=["Servicios GeoJSON"],
+    summary="Obtiene servicios cercanos desde archivos GeoJSON locales"
+)
+def obtener_servicios_geojson_cercanos(
+    latitud: float,
+    longitud: float,
+    radio: int = 1500,
+    categorias: str = None
+):
+    """
+    Obtiene servicios cercanos cargando datos desde archivos GeoJSON locales.
+    
+    **Parámetros:**
+    - `latitud`: Latitud del centro de búsqueda
+    - `longitud`: Longitud del centro de búsqueda
+    - `radio`: Radio de búsqueda en metros (default: 1500m)
+    - `categorias`: Lista de categorías separadas por coma (opcional)
+    
+    **Categorías disponibles:**
+    - areas_verdes, educacion_escolar, educacion_superior, parvularia
+    - salud, clinicas, cuarteles, bomberos, pdi
+    - ocio, tiendas, servicios, turismo, metro
+    
+    Retorna servicios organizados por categoría con indicador de distancia.
+    """
+    try:
+        logger.info(f"🗺️ Buscando servicios GeoJSON cerca de ({latitud}, {longitud}) - Radio: {radio}m")
+        
+        # Determinar qué categorías cargar
+        if categorias:
+            cats = [c.strip() for c in categorias.split(',')]
+        else:
+            cats = list(GEOJSON_MAPPING.keys())
+        
+        resultado = {}
+        total = 0
+        
+        for cat in cats:
+            puntos = cargar_geojson_filtrado(cat, latitud, longitud, radio)
+            if puntos:
+                resultado[cat] = puntos
+                total += len(puntos)
+        
+        logger.info(f"✅ Encontrados {total} servicios GeoJSON en {len(resultado)} categorías")
+        
+        return {
+            "categorias": resultado,
+            "total_encontrados": total,
+            "radio_busqueda": radio,
+            "centro": {"latitud": latitud, "longitud": longitud}
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error obteniendo servicios GeoJSON: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al obtener servicios GeoJSON: {str(e)}"
         )
 

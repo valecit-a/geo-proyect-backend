@@ -45,12 +45,13 @@ def get_db_connection():
     """Obtiene conexión a la base de datos"""
     # Intentar diferentes configuraciones
     configs = [
-        # Docker interno
-        {'host': 'db', 'port': 5432, 'database': 'inmobiliario_db', 'user': 'postgres', 'password': 'geo_pass'},
+        # Docker interno (nombre del servicio en docker-compose)
+        {'host': 'geoinformatica-db', 'port': 5432, 'database': 'inmobiliaria_db', 'user': 'postgres', 'password': 'geo_pass'},
+        {'host': 'db', 'port': 5432, 'database': 'inmobiliaria_db', 'user': 'postgres', 'password': 'geo_pass'},
         # Docker desde host
-        {'host': 'localhost', 'port': 5432, 'database': 'inmobiliario_db', 'user': 'postgres', 'password': 'geo_pass'},
-        # Local
-        {'host': 'localhost', 'port': 5433, 'database': 'inmobiliario_db', 'user': 'postgres', 'password': 'geo_pass'},
+        {'host': 'localhost', 'port': 5432, 'database': 'inmobiliaria_db', 'user': 'postgres', 'password': 'geo_pass'},
+        # Alternativas
+        {'host': 'localhost', 'port': 5433, 'database': 'inmobiliaria_db', 'user': 'postgres', 'password': 'geo_pass'},
     ]
     
     for config in configs:
@@ -66,72 +67,50 @@ def get_db_connection():
 
 
 def setup_comunas(cursor, conn):
-    """Crea o verifica las comunas necesarias"""
-    comunas_data = [
-        (1, 'Santiago', 'STG'),
-        (2, 'Ñuñoa', 'NUN'),
-        (3, 'La Reina', 'LRE'),
-        (4, 'Estación Central', 'ECE'),
-        (5, 'Cerrillos', 'CER'),
-        (6, 'Cerro Navia', 'CNV'),
-        (7, 'Conchalí', 'CON'),
-        (8, 'El Bosque', 'EBO'),
-        (9, 'Huechuraba', 'HUE'),
-        (10, 'Independencia', 'IND'),
-        (11, 'La Cisterna', 'LCI'),
-        (12, 'La Florida', 'LFL'),
-        (13, 'La Granja', 'LGR'),
-        (14, 'La Pintana', 'LPI'),
-        (15, 'Las Condes', 'LCO'),
-        (16, 'Lo Barnechea', 'LBA'),
-        (17, 'Lo Espejo', 'LES'),
-        (18, 'Lo Prado', 'LPR'),
-        (19, 'Macul', 'MAC'),
-        (20, 'Maipú', 'MAI'),
-        (21, 'Pedro Aguirre Cerda', 'PAC'),
-        (22, 'Peñalolén', 'PEN'),
-        (23, 'Providencia', 'PRO'),
-        (24, 'Pudahuel', 'PUD'),
-        (25, 'Quilicura', 'QUI'),
-        (26, 'Quinta Normal', 'QNO'),
-        (27, 'Recoleta', 'REC'),
-        (28, 'Renca', 'REN'),
-        (29, 'San Joaquín', 'SJO'),
-        (30, 'San Miguel', 'SMI'),
-        (31, 'San Ramón', 'SRA'),
-        (32, 'Vitacura', 'VIT'),
-    ]
+    """Obtiene el mapeo de comunas existentes en la base de datos"""
+    # Primero verificar si las comunas que necesitamos existen
+    comunas_necesarias = ['Santiago', 'Ñuñoa', 'La Reina', 'Estación Central']
     
-    for id, nombre, codigo in comunas_data:
-        try:
-            cursor.execute("""
-                INSERT INTO comunas (id, nombre, codigo) 
-                VALUES (%s, %s, %s) 
-                ON CONFLICT (id) DO UPDATE SET nombre = EXCLUDED.nombre, codigo = EXCLUDED.codigo
-            """, (id, nombre, codigo))
-        except Exception as e:
-            # Intentar sin código si la columna no existe
-            try:
-                cursor.execute("""
-                    INSERT INTO comunas (id, nombre) 
-                    VALUES (%s, %s) 
-                    ON CONFLICT (id) DO UPDATE SET nombre = EXCLUDED.nombre
-                """, (id, nombre))
-            except:
-                pass
-    
-    conn.commit()
-    
-    # Obtener mapa de comunas
+    # Obtener mapa de comunas existentes (buscar por nombre)
     cursor.execute("SELECT id, nombre FROM comunas")
-    return {row[1]: row[0] for row in cursor.fetchall()}
+    comunas_map = {}
+    for row in cursor.fetchall():
+        id_comuna, nombre = row
+        comunas_map[nombre] = id_comuna
+        # También mapear variantes sin tildes
+        nombre_sin_tildes = nombre.replace('á', 'a').replace('é', 'e').replace('í', 'i').replace('ó', 'o').replace('ú', 'u').replace('ñ', 'n')
+        comunas_map[nombre_sin_tildes] = id_comuna
+    
+    # Agregar alias comunes
+    if 'Ñuñoa' in comunas_map:
+        comunas_map['Nunoa'] = comunas_map['Ñuñoa']
+    if 'La Reina' in comunas_map:
+        comunas_map['LaReina'] = comunas_map['La Reina']
+    if 'Estación Central' in comunas_map:
+        comunas_map['Estacion Central'] = comunas_map['Estación Central']
+        comunas_map['EstacionCentral'] = comunas_map['Estación Central']
+    
+    # Verificar que tenemos las comunas necesarias
+    for comuna in comunas_necesarias:
+        if comuna not in comunas_map:
+            print(f"⚠️  Advertencia: Comuna '{comuna}' no encontrada en DB, usando ID por defecto")
+            # Intentar insertar
+            try:
+                cursor.execute("INSERT INTO comunas (nombre) VALUES (%s) RETURNING id", (comuna,))
+                new_id = cursor.fetchone()[0]
+                comunas_map[comuna] = new_id
+                conn.commit()
+            except Exception as e:
+                print(f"   Error insertando comuna: {e}")
+                # Usar Santiago como fallback
+                comunas_map[comuna] = comunas_map.get('Santiago', 1)
+    
+    return comunas_map
 
 
 def find_geojson_dir():
     """Encuentra el directorio de archivos GeoJSON"""
     possible_paths = [
-        Path('/app/datos_nuevos/DATOS_FILTRADOS'),
-        Path('/home/felipe/Documentos/GeoInformatica/datos_nuevos/DATOS_FILTRADOS'),
         Path('./datos_nuevos/DATOS_FILTRADOS'),
         Path('../datos_nuevos/DATOS_FILTRADOS'),
         Path('../../datos_nuevos/DATOS_FILTRADOS'),
@@ -197,16 +176,22 @@ def load_geojson_files(geojson_dir, cursor, conn, comunas_map):
                 banos = extract_number(props.get('banos', props.get('Baños', 1))) or 1
                 estacionamientos = extract_number(props.get('estacionamientos', 0))
                 
+                # Extraer dirección: preferir direccion_geocoded, luego ubicacion, luego comuna
+                direccion = props.get('direccion_geocoded') or props.get('ubicacion') or props.get('direccion') or comuna_nombre
+                
+                # El tipo se determina del nombre del archivo (Casa o Departamento)
+                tipo_propiedad = 'Departamento' if 'departamento' in nombre_archivo else 'Casa'
+                
                 cursor.execute('''
                     INSERT INTO propiedades (
                         comuna_id, titulo, descripcion, precio, 
                         superficie_util, superficie_total,
                         dormitorios, banos, estacionamientos, bodegas,
                         direccion, latitud, longitud, 
-                        geometria, divisa, fuente
+                        geometria, divisa, fuente, tipo_departamento
                     ) VALUES (
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s, %s
+                        ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s, %s, %s
                     )
                 ''', (
                     comuna_id,
@@ -219,12 +204,13 @@ def load_geojson_files(geojson_dir, cursor, conn, comunas_map):
                     banos,
                     estacionamientos,
                     extract_number(props.get('bodegas', 0)),
-                    props.get('direccion', comuna_nombre),
+                    direccion,
                     lat,
                     lon,
                     lon, lat,
                     'UF',
-                    'GeoJSON'
+                    'GeoJSON',
+                    tipo_propiedad
                 ))
                 insertados += 1
                 archivo_insertados += 1

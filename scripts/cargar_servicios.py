@@ -20,7 +20,7 @@ from datetime import datetime
 DB_CONFIG = {
     'dbname': os.getenv('POSTGRES_DB', 'inmobiliaria_db'),
     'user': os.getenv('POSTGRES_USER', 'postgres'),
-    'password': os.getenv('POSTGRES_PASSWORD', 'postgres'),
+    'password': os.getenv('POSTGRES_PASSWORD', 'geo_pass'),
     'host': os.getenv('POSTGRES_HOST', 'geoinformatica-db'),
     'port': os.getenv('POSTGRES_PORT', '5432')
 }
@@ -39,11 +39,12 @@ else:
 ARCHIVO_A_TIPO = {
     # Educación
     'establecimientos_educacion_escolar.geojson': 'colegio',
-    'establecimientos_educacion_superior.geojson': 'colegio',  # Universidad también como colegio
-    'establecimientos_parvularia_filtrados.geojson': 'colegio',  # Parvularia como colegio
+    'establecimientos_educacion_superior.geojson': 'universidad',
+    'establecimientos_parvularia_filtrados.geojson': 'colegio',
     
     # Transporte
-    'Lineas_de_metro_de_Santiago.geojson': 'metro',
+    'Lineas_de_metro_de_Santiago.geojson': 'metro',  # Este archivo tiene LineStrings, no sirve
+    'Estaciones_metro_Santiago.geojson': 'metro',  # Estaciones de metro como puntos
     
     # Salud (se diferenciará por properties)
     'puntos_medicos_farmacias_hospitales_filtrados.geojson': 'salud',  # Especial: contiene múltiples tipos
@@ -51,16 +52,16 @@ ARCHIVO_A_TIPO = {
     
     # Áreas verdes y recreación
     'areas_verdes_filtradas.geojson': 'parque',
-    'ocio_filtrado.geojson': 'parque',  # Ocio como parque
+    'ocio_filtrado.geojson': 'parque',
     
-    # Comercio
-    'tiendas_filtradas.geojson': 'supermercado',
-    'servicios_filtrados.geojson': 'supermercado',  # Servicios como supermercado
+    # Comercio (se diferenciará por properties)
+    'tiendas_filtradas.geojson': 'comercio',  # Especial: se diferencia por tipo
+    'servicios_filtrados.geojson': 'servicio',  # Especial: se diferencia por tipo
     
     # Seguridad
     'cuarteles_filtrados.geojson': 'comisaria',
     'cuerpos_de_bomberos_filtrados.geojson': 'bombero',
-    'unidades_operativas_pdi_filtradas.geojson': 'comisaria',  # PDI como comisaría
+    'unidades_operativas_pdi_filtradas.geojson': 'comisaria',
 }
 
 
@@ -126,13 +127,81 @@ def determinar_tipo_salud(properties: Dict) -> str:
     return 'centro_medico'
 
 
-def extraer_informacion_poi(feature: Dict, tipo_archivo: str) -> Optional[Dict]:
+def determinar_tipo_comercio(properties: Dict) -> str:
+    """
+    Determina el tipo específico de comercio basado en las propiedades.
+    
+    Args:
+        properties: Diccionario de propiedades del feature GeoJSON
+    
+    Returns:
+        Tipo de servicio: 'supermercado', 'tienda', etc.
+    """
+    shop = properties.get('shop', '').lower()
+    name = (properties.get('name', '') or '').lower()
+    
+    # Supermercados
+    supermercados_keywords = ['supermercado', 'supermarket', 'lider', 'jumbo', 'unimarc', 
+                              'santa isabel', 'acuenta', 'tottus', 'ekono', 'mayorista']
+    if shop == 'supermarket':
+        return 'supermercado'
+    if any(kw in name for kw in supermercados_keywords):
+        return 'supermercado'
+    
+    # Tiendas de conveniencia / almacenes
+    if shop in ['convenience', 'grocery', 'greengrocer']:
+        return 'supermercado'
+    if 'almac' in name or 'minimarket' in name or 'botilleria' in name:
+        return 'supermercado'
+    
+    # Por defecto, retornar tipo genérico (no se mostrará en el mapa)
+    return 'otro_comercio'
+
+
+def determinar_tipo_servicio(properties: Dict) -> str:
+    """
+    Determina el tipo específico de servicio basado en las propiedades.
+    
+    Args:
+        properties: Diccionario de propiedades del feature GeoJSON
+    
+    Returns:
+        Tipo de servicio específico o 'otro_servicio'
+    """
+    amenity = properties.get('amenity', '').lower()
+    shop = properties.get('shop', '').lower()
+    name = (properties.get('name', '') or '').lower()
+    
+    # Servicios bancarios
+    if amenity == 'bank' or 'banco' in name:
+        return 'banco'
+    if amenity == 'atm':
+        return 'cajero'
+    
+    # Correos
+    if amenity == 'post_office' or 'correo' in name or 'chilexpress' in name:
+        return 'correo'
+    
+    # Gasolineras
+    if amenity == 'fuel' or 'copec' in name or 'shell' in name or 'petrobras' in name:
+        return 'gasolinera'
+    
+    # Restaurantes y cafeterías
+    if amenity in ['restaurant', 'cafe', 'fast_food']:
+        return 'restaurante'
+    
+    # Por defecto, servicio genérico (no se mostrará)
+    return 'otro_servicio'
+
+
+def extraer_informacion_poi(feature: Dict, tipo_archivo: str, is_wgs84: bool = False) -> Optional[Dict]:
     """
     Extrae información relevante de un feature GeoJSON para crear un punto de interés.
     
     Args:
         feature: Feature GeoJSON
         tipo_archivo: Tipo de servicio del archivo
+        is_wgs84: Si True, las coordenadas ya están en WGS84 (lon, lat)
     
     Returns:
         Diccionario con información del POI o None si no se puede procesar
@@ -146,14 +215,22 @@ def extraer_informacion_poi(feature: Dict, tipo_archivo: str) -> Optional[Dict]:
         if not coordinates or len(coordinates) < 2:
             return None
         
-        x_utm, y_utm = coordinates[0], coordinates[1]
-        
-        # Convertir a lat/lon
-        latitud, longitud = transformar_coordenadas_utm_a_latlon(x_utm, y_utm)
+        if is_wgs84:
+            # Coordenadas ya en WGS84 (lon, lat)
+            longitud = coordinates[0]
+            latitud = coordinates[1]
+        else:
+            # Coordenadas en UTM - convertir
+            x_utm, y_utm = coordinates[0], coordinates[1]
+            latitud, longitud = transformar_coordenadas_utm_a_latlon(x_utm, y_utm)
         
         # Determinar tipo específico
         if tipo_archivo == 'salud':
             tipo = determinar_tipo_salud(properties)
+        elif tipo_archivo == 'comercio':
+            tipo = determinar_tipo_comercio(properties)
+        elif tipo_archivo == 'servicio':
+            tipo = determinar_tipo_servicio(properties)
         else:
             tipo = tipo_archivo
         
@@ -213,10 +290,26 @@ def cargar_archivo_geojson(archivo_path: Path, tipo_servicio: str, conn) -> int:
         features = data.get('features', [])
         print(f"  - Features encontrados: {len(features)}")
         
+        # Detectar CRS del archivo
+        # Si el CRS contiene 4326 o no está definido y las coordenadas son pequeñas, asumir WGS84
+        crs = data.get('crs', {})
+        crs_name = crs.get('properties', {}).get('name', '')
+        is_wgs84 = '4326' in crs_name
+        
+        # Si no detectamos el CRS, verificamos por el rango de coordenadas
+        if not is_wgs84 and features:
+            sample_coords = features[0].get('geometry', {}).get('coordinates', [])
+            if sample_coords and len(sample_coords) >= 2:
+                # Las coordenadas WGS84 de Chile: lon ~(-75 a -67), lat ~(-56 a -17)
+                # UTM: valores grandes (>100000)
+                if isinstance(sample_coords[0], (int, float)):
+                    if abs(sample_coords[0]) < 180 and abs(sample_coords[1]) < 90:
+                        is_wgs84 = True
+        
         # Procesar features
         pois = []
         for feature in features:
-            poi = extraer_informacion_poi(feature, tipo_servicio)
+            poi = extraer_informacion_poi(feature, tipo_servicio, is_wgs84)
             if poi:
                 pois.append(poi)
         

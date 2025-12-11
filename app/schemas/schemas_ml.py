@@ -204,6 +204,9 @@ class PreferenciasDetalladas(BaseModel):
     comunas_preferidas: Optional[List[str]] = Field(None, description="Lista de comunas preferidas")
     comunas_evitar: Optional[List[str]] = Field(None, description="Lista de comunas a evitar")
     
+    # ===== TIPO DE INMUEBLE =====
+    tipo_inmueble_preferido: Optional[str] = Field(None, description="Tipo de inmueble preferido: 'Casa' o 'Departamento'")
+    
     # ===== PREFERENCIAS DETALLADAS POR CATEGORÍA =====
     transporte: Optional[PreferenciasTransporte] = Field(None, description="Preferencias de transporte")
     educacion: Optional[PreferenciasEducacion] = Field(None, description="Preferencias de educación")
@@ -345,6 +348,7 @@ class PropiedadRecomendadaML(BaseModel):
     id: int
     direccion: str
     comuna: str
+    tipo_propiedad: str = 'Casa'  # Casa, Departamento, etc.
     precio: float  # Siempre en CLP (normalizado desde el backend)
     divisa: str = 'CLP'  # Divisa normalizada
     superficie_util: Optional[float] = 0.0
