@@ -28,6 +28,7 @@ env/
 ENV/
 env.bak/
 venv.bak/
+*.venv
 
 # Variables de entorno (NO subir passwords)
 .env
