@@ -160,11 +160,31 @@ def listar_propiedades(
         if comuna_obj:
             query = query.filter(Propiedad.comuna_id == comuna_obj.id)
     
+    total = query.count()
     propiedades = query.offset(skip).limit(limit).all()
     
+    # Serializar propiedades manualmente para evitar problemas con geometrías
+    propiedades_list = []
+    for p in propiedades:
+        comuna_nombre = db.query(Comuna.nombre).filter(Comuna.id == p.comuna_id).scalar() if p.comuna_id else None
+        propiedades_list.append({
+            "id": p.id,
+            "comuna": comuna_nombre,
+            "direccion": p.direccion,
+            "latitud": p.latitud,
+            "longitud": p.longitud,
+            "superficie_total": p.superficie_total,
+            "dormitorios": p.dormitorios,
+            "banos": p.banos,
+            "precio": p.precio,
+            "precio_predicho": p.precio_predicho,
+            "tipo_departamento": p.tipo_departamento,
+            "created_at": p.created_at.isoformat() if p.created_at else None
+        })
+    
     return {
-        "total": query.count(),
-        "propiedades": propiedades
+        "total": total,
+        "propiedades": propiedades_list
     }
 
 
