@@ -176,6 +176,12 @@ def load_geojson_files(geojson_dir, cursor, conn, comunas_map):
                 banos = extract_number(props.get('banos', props.get('Baños', 1))) or 1
                 estacionamientos = extract_number(props.get('estacionamientos', 0))
                 
+                # Extraer gastos comunes, orientación y piso
+                gastos_comunes = extract_float(props.get('gastos_comunes', 0)) or None
+                orientacion = props.get('orientacion', None)
+                numero_piso = extract_number(props.get('numero_piso_unidad', props.get('piso', 0))) or None
+                cantidad_pisos = extract_number(props.get('cantidad_pisos', 0)) or None
+                
                 # Extraer dirección: preferir direccion_geocoded, luego ubicacion, luego comuna
                 direccion = props.get('direccion_geocoded') or props.get('ubicacion') or props.get('direccion') or comuna_nombre
                 
@@ -188,10 +194,12 @@ def load_geojson_files(geojson_dir, cursor, conn, comunas_map):
                         superficie_util, superficie_total,
                         dormitorios, banos, estacionamientos, bodegas,
                         direccion, latitud, longitud, 
-                        geometria, divisa, fuente, tipo_departamento
+                        geometria, divisa, fuente, tipo_departamento,
+                        gastos_comunes, orientacion, numero_piso_unidad, cantidad_pisos
                     ) VALUES (
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s, %s, %s
+                        ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s, %s, %s,
+                        %s, %s, %s, %s
                     )
                 ''', (
                     comuna_id,
@@ -210,7 +218,11 @@ def load_geojson_files(geojson_dir, cursor, conn, comunas_map):
                     lon, lat,
                     'UF',
                     'GeoJSON',
-                    tipo_propiedad
+                    tipo_propiedad,
+                    gastos_comunes,
+                    orientacion,
+                    numero_piso,
+                    cantidad_pisos
                 ))
                 insertados += 1
                 archivo_insertados += 1

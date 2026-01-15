@@ -270,15 +270,15 @@ class RecommendationMLService:
                             peso=peso_satisfaccion,
                             contribucion=score_sat_normalizado * peso_satisfaccion,
                             explicacion=f"LightGBM: {satisfaccion_data['satisfaccion']:.1f}/10 ({satisfaccion_data['nivel']})",
-                            factores_positivos=[f"🤖 Predicción: {satisfaccion_data['nivel']}"],
+                            factores_positivos=[f"Predicción ML: {satisfaccion_data['nivel']}"],
                             factores_negativos=[]
                         ))
                         
                         # Agregar a puntos fuertes/débiles
                         if satisfaccion_data['satisfaccion'] >= 7:
-                            resultado['puntos_fuertes'].insert(0, f"🌟 Satisfacción ML: {satisfaccion_data['satisfaccion']:.1f}/10")
+                            resultado['puntos_fuertes'].insert(0, f"Satisfacción ML alta: {satisfaccion_data['satisfaccion']:.1f}/10")
                         elif satisfaccion_data['satisfaccion'] < 4:
-                            resultado['puntos_debiles'].insert(0, f"⚠️ Satisfacción ML baja: {satisfaccion_data['satisfaccion']:.1f}/10")
+                            resultado['puntos_debiles'].insert(0, f"Satisfacción ML baja: {satisfaccion_data['satisfaccion']:.1f}/10")
                 except Exception as e:
                     logger.debug(f"Error satisfacción para {resultado['propiedad'].id}: {e}")
         
@@ -310,6 +310,13 @@ class RecommendationMLService:
                 estacionamientos=prop.estacionamientos or 0,
                 latitud=prop.latitud or 0.0,
                 longitud=prop.longitud or 0.0,
+                # Características adicionales del edificio
+                gastos_comunes=prop.gastos_comunes,
+                orientacion=prop.orientacion,
+                numero_piso=prop.numero_piso_unidad,
+                cantidad_pisos=prop.cantidad_pisos,
+                bodegas=int(prop.bodegas) if prop.bodegas else 0,
+                # Scoring
                 score_total=min(100.0, max(0.0, round(resultado['score_total'], 2))),
                 score_confianza=min(1.0, max(0.0, round(resultado['confianza'], 3))),
                 scores_por_categoria=resultado['scores_categorias'],
@@ -568,9 +575,9 @@ class RecommendationMLService:
             factores_negativos=score_precio_data['negativos']
         ))
         if score_precio_data['score'] >= 70:
-            puntos_fuertes.append(f"💰 {score_precio_data['explicacion']}")
+            puntos_fuertes.append(f"Precio: {score_precio_data['explicacion']}")
         elif score_precio_data['score'] < 40:
-            puntos_debiles.append(f"💰 {score_precio_data['explicacion']}")
+            puntos_debiles.append(f"Precio: {score_precio_data['explicacion']}")
         
         # ===== 2. SCORE DE UBICACIÓN =====
         score_ubicacion_data = self._score_ubicacion(prop, pref)
@@ -584,7 +591,7 @@ class RecommendationMLService:
             factores_negativos=score_ubicacion_data['negativos']
         ))
         if score_ubicacion_data['score'] >= 70:
-            puntos_fuertes.append(f"📍 {score_ubicacion_data['explicacion']}")
+            puntos_fuertes.append(f"Ubicación: {score_ubicacion_data['explicacion']}")
         
         # ===== 3. SCORE DE TAMAÑO =====
         score_tamano_data = self._score_tamano(prop, pref)
@@ -613,9 +620,9 @@ class RecommendationMLService:
             if prop.dist_transporte_metro_m:
                 distancias['metro_m'] = round(prop.dist_transporte_metro_m, 1)
                 if score_transporte_data['score'] >= 70:
-                    puntos_fuertes.append(f"🚇 Metro a {int(prop.dist_transporte_metro_m)}m")
+                    puntos_fuertes.append(f"Metro a {int(prop.dist_transporte_metro_m)}m")
                 elif score_transporte_data['score'] < 40:
-                    puntos_debiles.append(f"🚇 Metro lejos ({int(prop.dist_transporte_metro_m)}m)")
+                    puntos_debiles.append(f"Metro lejos ({int(prop.dist_transporte_metro_m)}m)")
         
         # ===== 5. SCORE DE EDUCACIÓN =====
         if pref.educacion:
@@ -634,10 +641,10 @@ class RecommendationMLService:
                 # Si el usuario EVITA colegios y están lejos, es POSITIVO
                 if pref.educacion.importancia_colegios < 0:
                     if prop.dist_educacion_min_m > 500:
-                        puntos_fuertes.append(f"🎓 Sin colegios cerca ({int(prop.dist_educacion_min_m)}m) - como preferiste")
+                        puntos_fuertes.append(f"Sin colegios cerca ({int(prop.dist_educacion_min_m)}m) - como preferiste")
                 else:
                     if score_educacion_data['score'] >= 70:
-                        puntos_fuertes.append(f"🎓 Colegio a {int(prop.dist_educacion_min_m)}m")
+                        puntos_fuertes.append(f"Colegio a {int(prop.dist_educacion_min_m)}m")
         
         # ===== 6. SCORE DE SALUD =====
         if pref.salud:
@@ -654,7 +661,7 @@ class RecommendationMLService:
             if prop.dist_salud_min_m:
                 distancias['salud_m'] = round(prop.dist_salud_min_m, 1)
                 if score_salud_data['score'] >= 70:
-                    puntos_fuertes.append(f"🏥 Salud a {int(prop.dist_salud_min_m)}m")
+                    puntos_fuertes.append(f"Centro de salud a {int(prop.dist_salud_min_m)}m")
         
         # ===== 7. SCORE DE ÁREAS VERDES =====
         if pref.areas_verdes:
@@ -671,7 +678,7 @@ class RecommendationMLService:
             if prop.dist_areas_verdes_m:
                 distancias['parque_m'] = round(prop.dist_areas_verdes_m, 1)
                 if score_verdes_data['score'] >= 70:
-                    puntos_fuertes.append(f"🌳 Parque a {int(prop.dist_areas_verdes_m)}m")
+                    puntos_fuertes.append(f"Parque a {int(prop.dist_areas_verdes_m)}m")
         
         # ===== 8. SCORE DE EDIFICIO (NUEVO) =====
         if pref.edificio:
@@ -749,23 +756,29 @@ class RecommendationMLService:
         
         precio_m2 = prop.precio / prop.superficie_util if prop.superficie_util else 0
         
+        # Constante para conversión UF a CLP
+        VALOR_UF_CLP = 37500
+        precio_clp = int(prop.precio * VALOR_UF_CLP)
+        precio_formateado = f"{int(prop.precio):,} UF (${precio_clp:,} CLP)"
+        
         positivos = []
         negativos = []
         
         if score >= 80:
-            explicacion = f"Excelente precio (${int(prop.precio):,})"
-            positivos.append(f"Precio muy competitivo: ${int(prop.precio):,}")
+            explicacion = f"Excelente precio ({precio_formateado})"
+            positivos.append(f"Precio muy competitivo: {precio_formateado}")
         elif score >= 60:
-            explicacion = f"Buen precio (${int(prop.precio):,})"
-            positivos.append(f"Precio razonable: ${int(prop.precio):,}")
+            explicacion = f"Buen precio ({precio_formateado})"
+            positivos.append(f"Precio razonable: {precio_formateado}")
         elif score >= 40:
-            explicacion = f"Precio moderado (${int(prop.precio):,})"
+            explicacion = f"Precio moderado ({precio_formateado})"
         else:
-            explicacion = f"Precio alto (${int(prop.precio):,})"
-            negativos.append(f"Precio alto para presupuesto: ${int(prop.precio):,}")
+            explicacion = f"Precio alto ({precio_formateado})"
+            negativos.append(f"Precio alto para presupuesto: {precio_formateado}")
         
         if precio_m2 > 0:
-            positivos.append(f"Precio/m²: ${int(precio_m2):,}")
+            precio_m2_clp = int(precio_m2 * VALOR_UF_CLP)
+            positivos.append(f"Precio/m²: {int(precio_m2):,} UF (${precio_m2_clp:,} CLP)")
         
         return {
             'score': score,
@@ -1096,13 +1109,13 @@ class RecommendationMLService:
             if prop.gastos_comunes <= pref_edif.gastos_comunes_max:
                 bonus = 25 * (1 - prop.gastos_comunes / pref_edif.gastos_comunes_max)
                 score += bonus
-                positivos.append(f"💰 Gastos ${int(prop.gastos_comunes):,} (dentro de presupuesto)")
+                positivos.append(f"Gastos comunes ${int(prop.gastos_comunes):,} (dentro de presupuesto)")
                 explicaciones.append(f"Gastos comunes ${int(prop.gastos_comunes):,}")
             else:
                 exceso = (prop.gastos_comunes - pref_edif.gastos_comunes_max) / pref_edif.gastos_comunes_max
                 penalizacion = min(30, exceso * 50)
                 score -= penalizacion
-                negativos.append(f"💸 Gastos ${int(prop.gastos_comunes):,} (excede ${int(pref_edif.gastos_comunes_max):,})")
+                negativos.append(f"Gastos comunes ${int(prop.gastos_comunes):,} (excede ${int(pref_edif.gastos_comunes_max):,})")
                 explicaciones.append(f"Gastos exceden presupuesto en ${int(prop.gastos_comunes - pref_edif.gastos_comunes_max):,}")
         
         # ===== 2. PISO Y ALTURA =====
@@ -1110,10 +1123,10 @@ class RecommendationMLService:
             # Aplicar filtros de rango
             if pref_edif.piso_minimo and prop.numero_piso_unidad < pref_edif.piso_minimo:
                 score -= 20
-                negativos.append(f"🏢 Piso {prop.numero_piso_unidad} (buscas piso {pref_edif.piso_minimo}+)")
+                negativos.append(f"Piso {prop.numero_piso_unidad} (buscas piso {pref_edif.piso_minimo}+)")
             elif pref_edif.piso_maximo and prop.numero_piso_unidad > pref_edif.piso_maximo:
                 score -= 20
-                negativos.append(f"🏢 Piso {prop.numero_piso_unidad} (buscas hasta piso {pref_edif.piso_maximo})")
+                negativos.append(f"Piso {prop.numero_piso_unidad} (buscas hasta piso {pref_edif.piso_maximo})")
             else:
                 # Scoring basado en preferencia alto/bajo
                 if pref_edif.importancia_piso_alto > 0:
@@ -1121,13 +1134,13 @@ class RecommendationMLService:
                     score_piso = (prop.numero_piso_unidad / 20) * 25  # Max 25 puntos
                     score += score_piso * (pref_edif.importancia_piso_alto / 10)
                     if prop.numero_piso_unidad >= 10:
-                        positivos.append(f"🏢 Piso {prop.numero_piso_unidad} (alto, como prefieres)")
+                        positivos.append(f"Piso {prop.numero_piso_unidad} (alto, como prefieres)")
                 elif pref_edif.importancia_piso_alto < 0:
                     # Usuario prefiere pisos bajos
                     score_piso = max(0, 25 - (prop.numero_piso_unidad / 20) * 25)
                     score += score_piso * (abs(pref_edif.importancia_piso_alto) / 10)
                     if prop.numero_piso_unidad <= 3:
-                        positivos.append(f"🏢 Piso {prop.numero_piso_unidad} (bajo, como prefieres)")
+                        positivos.append(f"Piso {prop.numero_piso_unidad} (bajo, como prefieres)")
                 
                 explicaciones.append(f"Piso {prop.numero_piso_unidad}")
         
@@ -1140,43 +1153,43 @@ class RecommendationMLService:
             
             if orientacion_match:
                 score += 20 * (pref_edif.importancia_orientacion / 10)
-                positivos.append(f"☀️ Orientación {prop.orientacion.title()} (preferida)")
+                positivos.append(f"Orientación {prop.orientacion.title()} (preferida)")
                 explicaciones.append(f"Orientación ideal: {prop.orientacion}")
             else:
                 if pref_edif.importancia_orientacion > 5:
                     score -= 10
-                    negativos.append(f"🌥️ Orientación {prop.orientacion.title()} (prefieres {', '.join(pref_edif.orientaciones_preferidas)})")
+                    negativos.append(f"Orientación {prop.orientacion.title()} (prefieres {', '.join(pref_edif.orientaciones_preferidas)})")
         
         # ===== 4. TERRAZA =====
         if pref_edif.necesita_terraza:
             if prop.superficie_terraza and prop.superficie_terraza >= (pref_edif.terraza_minima_m2 or 0):
                 score += 25
-                positivos.append(f"🌿 Terraza {int(prop.superficie_terraza)}m² (indispensable)")
+                positivos.append(f"Terraza {int(prop.superficie_terraza)}m² (indispensable)")
                 explicaciones.append(f"Terraza de {int(prop.superficie_terraza)}m²")
             elif not prop.superficie_terraza or prop.superficie_terraza < (pref_edif.terraza_minima_m2 or 0):
                 score -= 30  # Penalización FUERTE si es indispensable
-                negativos.append(f"❌ Sin terraza (indispensable para ti)")
+                negativos.append(f"Sin terraza (indispensable para ti)")
         elif pref_edif.importancia_terraza > 0:
             if prop.superficie_terraza:
                 bonus = min(15, (prop.superficie_terraza / 20) * 15)
                 score += bonus * (pref_edif.importancia_terraza / 10)
-                positivos.append(f"🌿 Terraza {int(prop.superficie_terraza)}m²")
+                positivos.append(f"Terraza {int(prop.superficie_terraza)}m²")
         
         # ===== 5. TIPO DE DEPARTAMENTO =====
         if prop.tipo_departamento and pref_edif.tipo_preferido:
             if prop.tipo_departamento.lower() == pref_edif.tipo_preferido.lower():
                 score += 10 * (pref_edif.importancia_tipo / 10)
-                positivos.append(f"🏠 Depto {prop.tipo_departamento} (como prefieres)")
+                positivos.append(f"Departamento {prop.tipo_departamento} (como prefieres)")
         
         # ===== 6. PRIVACIDAD/DENSIDAD =====
         if prop.departamentos_piso and pref_edif.departamentos_por_piso_max:
             if prop.departamentos_piso <= pref_edif.departamentos_por_piso_max:
                 score += 10
                 if prop.departamentos_piso <= 2:
-                    positivos.append(f"🤫 Solo {prop.departamentos_piso} deptos/piso (privado)")
+                    positivos.append(f"Solo {prop.departamentos_piso} deptos/piso (privado)")
             else:
                 score -= 10
-                negativos.append(f"👥 {prop.departamentos_piso} deptos/piso (buscas max {pref_edif.departamentos_por_piso_max})")
+                negativos.append(f"{prop.departamentos_piso} deptos/piso (buscas max {pref_edif.departamentos_por_piso_max})")
         
         # Limitar score entre 0 y 100
         score = max(0, min(100, score))

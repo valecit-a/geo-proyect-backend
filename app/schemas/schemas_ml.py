@@ -358,6 +358,13 @@ class PropiedadRecomendadaML(BaseModel):
     latitud: Optional[float] = 0.0
     longitud: Optional[float] = 0.0
     
+    # Características adicionales del edificio/departamento
+    gastos_comunes: Optional[float] = None  # Gastos comunes en CLP
+    orientacion: Optional[str] = None  # Norte, Sur, Oriente, Poniente
+    numero_piso: Optional[int] = None  # Número de piso de la unidad
+    cantidad_pisos: Optional[int] = None  # Total de pisos del edificio
+    bodegas: Optional[int] = 0  # Número de bodegas
+    
     # Scoring
     score_total: float = Field(..., ge=0, le=100, description="Score total (0-100)")
     score_confianza: float = Field(..., ge=0, le=1, description="Confianza del modelo (0-1)")
